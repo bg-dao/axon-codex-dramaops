@@ -28,6 +28,10 @@ func (a *ProjectAPI) Create(root string, options project.CreateOptions) (domain.
 	if err := a.backend.SetProject(snapshot.Root); err != nil {
 		return domain.Snapshot{}, err
 	}
+	snapshot, err = a.backend.store.Open(snapshot.Root)
+	if err != nil {
+		return domain.Snapshot{}, err
+	}
 	a.backend.emit(EventProjectChanged, snapshot)
 	return snapshot, nil
 }
@@ -40,7 +44,7 @@ func (a *ProjectAPI) Open(root string) (domain.Snapshot, error) {
 	if err := a.backend.SetProject(snapshot.Root); err != nil {
 		return domain.Snapshot{}, err
 	}
-	return snapshot, nil
+	return a.backend.store.Open(snapshot.Root)
 }
 
 func (a *ProjectAPI) Current() (domain.Snapshot, error) {

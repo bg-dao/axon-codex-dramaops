@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/bg-dao/axon-codex-dramaops/internal/domain"
@@ -134,6 +135,56 @@ func TestAssetSelectionTypesAndMultiInputProvenance(t *testing.T) {
 	}
 }
 
+func TestImportAssetValidatesOwnershipAndLocksDialogueVoice(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "series")
+	store := NewStore()
+	snapshot, err := store.Create(root, "Import ownership")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = store.ApplyScript(root, testScriptPlan(snapshot.Episodes[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err = store.ApplyShotPlan(root, snapshot.Episodes[0].ID, []domain.Shot{{ID: "shot-001", SceneID: "scene-001", Title: "Shot", Prompt: "Shot"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audioSource := filepath.Join(t.TempDir(), "dialogue.wav")
+	if err := os.WriteFile(audioSource, []byte("dialogue"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	audio, err := store.ImportAsset(root, ImportOptions{Source: audioSource, ScriptBlockID: "block-002", Kind: domain.AssetKindAudio})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audio.EpisodeID != "episode-001" || audio.Provenance.Parameters["voiceProfileId"] != "voice-lin" {
+		t.Fatalf("dialogue ownership/provenance = %+v", audio)
+	}
+	opened, err := store.Open(root)
+	if err != nil || opened.Episodes[0].ScriptBlocks[1].SelectedVoiceAssetID != audio.ID {
+		t.Fatalf("dialogue selection = %+v, err = %v", opened.Episodes[0].ScriptBlocks, err)
+	}
+
+	second := domain.Episode{SchemaVersion: domain.SchemaVersion, ID: "episode-002", Number: 2, Title: "Episode 2", Status: domain.EpisodeDraft, SceneIDs: []string{}, ScriptBlocks: []domain.ScriptBlock{}}
+	if err := store.SaveEpisode(root, second); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveEdit(root, domain.EpisodeEdit{SchemaVersion: domain.SchemaVersion, EpisodeID: second.ID, VideoTrack: []domain.VideoClip{}, AudioCues: []domain.AudioCue{}, SubtitleCues: []domain.SubtitleCue{}, Output: snapshot.Project.Output}); err != nil {
+		t.Fatal(err)
+	}
+	videoSource := filepath.Join(t.TempDir(), "clip.mp4")
+	if err := os.WriteFile(videoSource, []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ImportAsset(root, ImportOptions{Source: videoSource, EpisodeID: second.ID, ShotID: "shot-001", Kind: domain.AssetKindVideo}); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("cross-episode asset must fail before writing: %v", err)
+	}
+	if reopened, err := store.Open(root); err != nil || len(reopened.Assets) != 1 {
+		t.Fatalf("failed import damaged project: assets=%d err=%v", len(reopened.Assets), err)
+	}
+}
+
 func TestResolveRelativeRejectsEscapesAndSymlinks(t *testing.T) {
 	root := t.TempDir()
 	for _, path := range []string{"../outside", "/tmp/outside", "scenes/../../outside", ""} {
@@ -183,6 +234,88 @@ func TestAtomicWriteAndUnsupportedFormatsFailClosed(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(legacy, "scene"+"ops.project.json"), []byte(`{"schemaVersion":1}`), 0o644)
 	if _, err := NewStore().Open(legacy); err == nil || !strings.Contains(err.Error(), "unsupported legacy") {
 		t.Fatalf("legacy format did not fail clearly: %v", err)
+	}
+}
+
+func TestOpenRejectsTrailingJSONAndSymlinkedManifests(t *testing.T) {
+	store := NewStore()
+
+	trailingRoot := filepath.Join(t.TempDir(), "trailing")
+	if _, err := store.Create(trailingRoot, "Trailing"); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(trailingRoot, ProjectManifest)
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(manifest, []byte("\n{}")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Open(trailingRoot); err == nil || !strings.Contains(err.Error(), "trailing JSON value") {
+		t.Fatalf("trailing JSON must fail closed: %v", err)
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	manifestRoot := filepath.Join(t.TempDir(), "manifest-link")
+	if _, err := store.Create(manifestRoot, "Manifest link"); err != nil {
+		t.Fatal(err)
+	}
+	outsideCharacter := filepath.Join(t.TempDir(), "outside-character.json")
+	if err := AtomicWriteJSON(outsideCharacter, domain.Character{SchemaVersion: domain.SchemaVersion, ID: "outside", Name: "Outside", VoiceProfile: domain.VoiceProfile{ID: "voice-outside", Kind: domain.VoiceBuiltIn, BuiltInVoice: "alloy"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideCharacter, filepath.Join(manifestRoot, "characters", "outside.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Open(manifestRoot); err == nil || !strings.Contains(err.Error(), "symlink paths are not allowed") {
+		t.Fatalf("symlinked manifest must fail closed: %v", err)
+	}
+
+	directoryRoot := filepath.Join(t.TempDir(), "directory-link")
+	if _, err := store.Create(directoryRoot, "Directory link"); err != nil {
+		t.Fatal(err)
+	}
+	outsideDirectory := t.TempDir()
+	if err := AtomicWriteJSON(filepath.Join(outsideDirectory, "outside.json"), domain.Prop{SchemaVersion: domain.SchemaVersion, ID: "outside", Name: "Outside"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(directoryRoot, "props")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDirectory, filepath.Join(directoryRoot, "props")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Open(directoryRoot); err == nil || !strings.Contains(err.Error(), "symlink paths are not allowed") {
+		t.Fatalf("symlinked manifest directory must fail closed: %v", err)
+	}
+}
+
+func TestConcurrentIndexRebuildKeepsAReadableIndex(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "series")
+	if _, err := NewStore().Create(root, "Concurrent index"); err != nil {
+		t.Fatal(err)
+	}
+	errorsByWorker := make(chan error, 12)
+	var workers sync.WaitGroup
+	for i := 0; i < cap(errorsByWorker); i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			errorsByWorker <- RebuildIndex(root)
+		}()
+	}
+	workers.Wait()
+	close(errorsByWorker)
+	for err := range errorsByWorker {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count, err := CountIndexed(root, "episodes"); err != nil || count != 1 {
+		t.Fatalf("rebuilt index count = %d, err = %v", count, err)
 	}
 }
 

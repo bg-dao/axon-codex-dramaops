@@ -45,6 +45,8 @@ type Backend struct {
 	media            *media.Service
 	session          *appserver.Session
 	monitorCancel    context.CancelFunc
+	projectCtx       context.Context
+	projectCancel    context.CancelFunc
 	renderCancels    map[string]context.CancelFunc
 	renderRuntime    renderengine.RuntimeStatus
 }
@@ -82,6 +84,9 @@ func (b *Backend) Shutdown(_ context.Context) {
 	if b.monitorCancel != nil {
 		b.monitorCancel()
 	}
+	if b.projectCancel != nil {
+		b.projectCancel()
+	}
 	for _, cancel := range b.renderCancels {
 		cancel()
 	}
@@ -95,22 +100,58 @@ func (b *Backend) Shutdown(_ context.Context) {
 }
 
 func (b *Backend) SetProject(root string) error {
-	if _, err := b.store.Open(root); err != nil {
+	snapshot, err := b.store.Open(root)
+	if err != nil {
 		return err
 	}
+	root = snapshot.Root
+	b.mu.RLock()
+	if b.root == root && b.media != nil {
+		b.mu.RUnlock()
+		return nil
+	}
+	b.mu.RUnlock()
+
+	gate := approval.NewFileGate(root)
+	if pending, pendingErr := gate.Pending(); pendingErr != nil {
+		return pendingErr
+	} else {
+		for _, request := range pending {
+			if _, resolveErr := gate.Resolve(request.ID, false); resolveErr != nil {
+				return resolveErr
+			}
+		}
+	}
+	mediaService := &media.Service{
+		Root: root, Store: b.store, Image: b.imageProvider, Video: b.videoProvider, Speech: b.speechProvider, Approval: gate,
+		ResolveVoice: func(profileID string) (string, error) { return secret.ResolveVoiceBinding(b.secrets, profileID) },
+	}
+	if err := mediaService.RecoverInterruptedRuns(); err != nil {
+		return err
+	}
+
 	b.mu.Lock()
+	if b.root == root && b.media != nil {
+		b.mu.Unlock()
+		return nil
+	}
 	if b.monitorCancel != nil {
 		b.monitorCancel()
 	}
+	if b.projectCancel != nil {
+		b.projectCancel()
+	}
+	for _, cancel := range b.renderCancels {
+		cancel()
+	}
+	b.renderCancels = make(map[string]context.CancelFunc)
 	oldSession := b.session
 	b.session = nil
 	b.root = root
-	b.gate = approval.NewFileGate(root)
-	b.media = &media.Service{
-		Root: root, Store: b.store, Image: b.imageProvider, Video: b.videoProvider, Speech: b.speechProvider, Approval: b.gate,
-		ResolveVoice: func(profileID string) (string, error) { return secret.ResolveVoiceBinding(b.secrets, profileID) },
-	}
-	monitorCtx, cancel := context.WithCancel(b.context())
+	b.gate = gate
+	b.media = mediaService
+	b.projectCtx, b.projectCancel = context.WithCancel(b.context())
+	monitorCtx, cancel := context.WithCancel(b.projectCtx)
 	b.monitorCancel = cancel
 	b.mu.Unlock()
 	if oldSession != nil {
@@ -198,6 +239,15 @@ func (b *Backend) context() context.Context {
 		return b.ctx
 	}
 	return context.Background()
+}
+
+func (b *Backend) projectContext() context.Context {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.projectCtx != nil {
+		return b.projectCtx
+	}
+	return b.context()
 }
 
 func (b *Backend) emit(name string, payload any) {

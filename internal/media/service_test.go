@@ -283,3 +283,110 @@ func TestApprovalDeclineCapabilityAndCancelFailClosed(t *testing.T) {
 		t.Fatalf("cancelled = %+v, err = %v", cancelled, err)
 	}
 }
+
+func TestDuplicatePaidGenerationIsRejectedBeforeProviderCall(t *testing.T) {
+	service, root, fake := setupService(t, approval.AutoGate{Approved: true})
+	now := time.Now().UTC()
+	if err := service.Store.SaveRun(root, domain.Run{
+		SchemaVersion: domain.SchemaVersion,
+		ID:            "active-image-run",
+		Operation:     "image_generate",
+		Status:        domain.RunRunning,
+		EpisodeID:     "episode-001",
+		ShotID:        "shot-1",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GenerateImage(context.Background(), "shot-1", provider.ImageRequest{Prompt: "duplicate"}); err == nil || !strings.Contains(err.Error(), "already active") {
+		t.Fatalf("duplicate generation must fail closed: %v", err)
+	}
+	if fake.providerCalls != 0 {
+		t.Fatalf("duplicate generation reached provider %d times", fake.providerCalls)
+	}
+}
+
+func TestConcurrentVideoPollingDownloadsExactlyOneAsset(t *testing.T) {
+	service, root, _ := setupService(t, approval.AutoGate{Approved: true})
+	image, err := service.GenerateImage(context.Background(), "shot-1", provider.ImageRequest{Prompt: "keyframe"})
+	if err != nil || image.Asset == nil {
+		t.Fatal(err)
+	}
+	video, err := service.GenerateVideo(context.Background(), "shot-1", provider.VideoRequest{Prompt: "clip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type pollResult struct {
+		result Result
+		err    error
+	}
+	results := make(chan pollResult, 8)
+	var workers sync.WaitGroup
+	for i := 0; i < cap(results); i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			result, err := service.GetRun(context.Background(), video.Run.ID)
+			results <- pollResult{result: result, err: err}
+		}()
+	}
+	workers.Wait()
+	close(results)
+	assetID := ""
+	for value := range results {
+		if value.err != nil || value.result.Asset == nil {
+			t.Fatalf("poll result = %+v, err = %v", value.result, value.err)
+		}
+		if assetID == "" {
+			assetID = value.result.Asset.ID
+		} else if value.result.Asset.ID != assetID {
+			t.Fatalf("polls created different assets: %s != %s", value.result.Asset.ID, assetID)
+		}
+	}
+	snapshot, err := service.Store.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	videoAssets := 0
+	for _, asset := range snapshot.Assets {
+		if asset.RunID == video.Run.ID {
+			videoAssets++
+		}
+	}
+	if videoAssets != 1 {
+		t.Fatalf("video run produced %d assets", videoAssets)
+	}
+}
+
+func TestRecoveryFailsOrphanedWorkButKeepsResumableVideo(t *testing.T) {
+	service, root, _ := setupService(t, approval.AutoGate{Approved: true})
+	now := time.Now().UTC()
+	runs := []domain.Run{
+		{SchemaVersion: domain.SchemaVersion, ID: "orphan-image", Operation: "image_generate", Status: domain.RunAwaitingApproval, EpisodeID: "episode-001", ShotID: "shot-1", CreatedAt: now},
+		{SchemaVersion: domain.SchemaVersion, ID: "orphan-speech", Operation: "speech_generate", Status: domain.RunRunning, EpisodeID: "episode-001", ScriptBlockID: "block-1", CreatedAt: now},
+		{SchemaVersion: domain.SchemaVersion, ID: "resumable-video", Operation: "video_generate", Status: domain.RunRunning, EpisodeID: "episode-001", ShotID: "shot-2", ProviderJobID: "provider-video", CreatedAt: now},
+	}
+	for _, run := range runs {
+		if err := service.Store.SaveRun(root, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := service.RecoverInterruptedRuns(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := service.Store.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := map[string]domain.RunStatus{}
+	for _, run := range snapshot.Runs {
+		statuses[run.ID] = run.Status
+	}
+	if statuses["orphan-image"] != domain.RunFailed || statuses["orphan-speech"] != domain.RunFailed || statuses["resumable-video"] != domain.RunRunning {
+		t.Fatalf("recovered statuses = %+v", statuses)
+	}
+	if result, err := service.GenerateImage(context.Background(), "shot-1", provider.ImageRequest{Prompt: "retry"}); err != nil || result.Run.Status != domain.RunSucceeded {
+		t.Fatalf("retry after recovery = %+v, err = %v", result, err)
+	}
+}

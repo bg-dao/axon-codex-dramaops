@@ -167,22 +167,26 @@ func (s *Store) Open(root string) (domain.Snapshot, error) {
 	}
 	loads := []func() error{
 		func() error {
-			return loadJSONGlob(filepath.Join(absRoot, "episodes", "*", "episode.json"), &snapshot.Episodes)
+			return loadJSONGlob(absRoot, filepath.Join(absRoot, "episodes", "*", "episode.json"), &snapshot.Episodes)
 		},
 		func() error {
-			return loadJSONGlob(filepath.Join(absRoot, "episodes", "*", "edit.json"), &snapshot.Edits)
+			return loadJSONGlob(absRoot, filepath.Join(absRoot, "episodes", "*", "edit.json"), &snapshot.Edits)
 		},
 		func() error {
-			return loadJSONGlob(filepath.Join(absRoot, "characters", "*.json"), &snapshot.Characters)
+			return loadJSONGlob(absRoot, filepath.Join(absRoot, "characters", "*.json"), &snapshot.Characters)
 		},
-		func() error { return loadJSONGlob(filepath.Join(absRoot, "locations", "*.json"), &snapshot.Locations) },
-		func() error { return loadJSONGlob(filepath.Join(absRoot, "props", "*.json"), &snapshot.Props) },
-		func() error { return loadJSONGlob(filepath.Join(absRoot, "scenes", "*.json"), &snapshot.Scenes) },
-		func() error { return loadJSONGlob(filepath.Join(absRoot, "shots", "*.json"), &snapshot.Shots) },
 		func() error {
-			return loadJSONGlob(filepath.Join(absRoot, "assets", "*", "asset.json"), &snapshot.Assets)
+			return loadJSONGlob(absRoot, filepath.Join(absRoot, "locations", "*.json"), &snapshot.Locations)
 		},
-		func() error { return loadJSONGlob(filepath.Join(absRoot, "runs", "*.json"), &snapshot.Runs) },
+		func() error { return loadJSONGlob(absRoot, filepath.Join(absRoot, "props", "*.json"), &snapshot.Props) },
+		func() error {
+			return loadJSONGlob(absRoot, filepath.Join(absRoot, "scenes", "*.json"), &snapshot.Scenes)
+		},
+		func() error { return loadJSONGlob(absRoot, filepath.Join(absRoot, "shots", "*.json"), &snapshot.Shots) },
+		func() error {
+			return loadJSONGlob(absRoot, filepath.Join(absRoot, "assets", "*", "asset.json"), &snapshot.Assets)
+		},
+		func() error { return loadJSONGlob(absRoot, filepath.Join(absRoot, "runs", "*.json"), &snapshot.Runs) },
 	}
 	for _, load := range loads {
 		if err := load(); err != nil {
@@ -951,11 +955,61 @@ func (s *Store) ImportAsset(root string, options ImportOptions) (domain.Asset, e
 	if options.EpisodeID != "" && !episodeExists(snapshot, options.EpisodeID) {
 		return domain.Asset{}, fmt.Errorf("episode %s not found", options.EpisodeID)
 	}
-	if options.ShotID != "" && !shotExists(snapshot, options.ShotID) {
-		return domain.Asset{}, fmt.Errorf("shot %s not found", options.ShotID)
+	if options.ShotID != "" {
+		var linkedShot *domain.Shot
+		for i := range snapshot.Shots {
+			if snapshot.Shots[i].ID == options.ShotID {
+				linkedShot = &snapshot.Shots[i]
+				break
+			}
+		}
+		if linkedShot == nil {
+			return domain.Asset{}, fmt.Errorf("shot %s not found", options.ShotID)
+		}
+		if options.EpisodeID == "" {
+			options.EpisodeID = linkedShot.EpisodeID
+		} else if options.EpisodeID != linkedShot.EpisodeID {
+			return domain.Asset{}, fmt.Errorf("shot %s does not belong to episode %s", options.ShotID, options.EpisodeID)
+		}
 	}
-	if options.ScriptBlockID != "" && !scriptBlockExists(snapshot, options.ScriptBlockID) {
-		return domain.Asset{}, fmt.Errorf("script block %s not found", options.ScriptBlockID)
+	voiceProfileID := ""
+	if options.ScriptBlockID != "" {
+		var linkedEpisode *domain.Episode
+		var linkedBlock *domain.ScriptBlock
+		for episodeIndex := range snapshot.Episodes {
+			for blockIndex := range snapshot.Episodes[episodeIndex].ScriptBlocks {
+				if snapshot.Episodes[episodeIndex].ScriptBlocks[blockIndex].ID == options.ScriptBlockID {
+					linkedEpisode = &snapshot.Episodes[episodeIndex]
+					linkedBlock = &snapshot.Episodes[episodeIndex].ScriptBlocks[blockIndex]
+					break
+				}
+			}
+			if linkedBlock != nil {
+				break
+			}
+		}
+		if linkedBlock == nil {
+			return domain.Asset{}, fmt.Errorf("script block %s not found", options.ScriptBlockID)
+		}
+		if options.EpisodeID == "" {
+			options.EpisodeID = linkedEpisode.ID
+		} else if options.EpisodeID != linkedEpisode.ID {
+			return domain.Asset{}, fmt.Errorf("script block %s does not belong to episode %s", options.ScriptBlockID, options.EpisodeID)
+		}
+		if options.Kind == domain.AssetKindAudio {
+			if linkedBlock.Kind != domain.ScriptDialogue && linkedBlock.Kind != domain.ScriptVoiceOver {
+				return domain.Asset{}, fmt.Errorf("script block %s is not dialogue", options.ScriptBlockID)
+			}
+			for _, character := range snapshot.Characters {
+				if character.ID == linkedBlock.CharacterID {
+					voiceProfileID = character.VoiceProfile.ID
+					break
+				}
+			}
+			if voiceProfileID == "" {
+				return domain.Asset{}, fmt.Errorf("dialogue character %s has no Voice Profile", linkedBlock.CharacterID)
+			}
+		}
 	}
 	for _, input := range options.Inputs {
 		if !assetExists(snapshot, input.AssetID) {
@@ -1004,11 +1058,15 @@ func (s *Store) ImportAsset(root string, options ImportOptions) (domain.Asset, e
 		_ = os.Remove(tmpName)
 		return domain.Asset{}, err
 	}
+	parameters := map[string]any{}
+	if voiceProfileID != "" {
+		parameters["voiceProfileId"] = voiceProfileID
+	}
 	asset := domain.Asset{
 		SchemaVersion: domain.SchemaVersion, ID: assetID, EpisodeID: options.EpisodeID, ShotID: options.ShotID,
 		ScriptBlockID: options.ScriptBlockID, Kind: options.Kind, RelativePath: filepath.ToSlash(rel),
 		SHA256: hex.EncodeToString(hash.Sum(nil)), Inputs: options.Inputs,
-		Provenance: domain.Provenance{Provider: "external-import", GeneratedAt: s.now()}, CreatedAt: s.now(),
+		Provenance: domain.Provenance{Provider: "external-import", Parameters: parameters, GeneratedAt: s.now()}, CreatedAt: s.now(),
 	}
 	if err := s.SaveAsset(root, asset); err != nil {
 		return domain.Asset{}, err
@@ -1108,17 +1166,32 @@ func readJSON(path string, output any) error {
 	if err := decoder.Decode(output); err != nil {
 		return fmt.Errorf("decode %s: %w", path, err)
 	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("decode %s: trailing JSON value", path)
+		}
+		return fmt.Errorf("decode %s: trailing content: %w", path, err)
+	}
 	return nil
 }
 
-func loadJSONGlob[T any](pattern string, output *[]T) error {
+func loadJSONGlob[T any](root, pattern string, output *[]T) error {
 	paths, err := filepath.Glob(pattern)
 	if err != nil {
 		return err
 	}
 	for _, path := range paths {
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return fmt.Errorf("resolve manifest path %s: %w", path, err)
+		}
+		resolved, err := ResolveRelative(root, relative)
+		if err != nil {
+			return err
+		}
 		var value T
-		if err := readJSON(path, &value); err != nil {
+		if err := readJSON(resolved, &value); err != nil {
 			return err
 		}
 		*output = append(*output, value)

@@ -365,7 +365,7 @@ func (a *RenderAPI) recover(root string) {
 		return
 	}
 	for _, run := range snapshot.Runs {
-		if run.Operation != "episode_render" || run.Status != domain.RunRunning {
+		if run.Operation != "episode_render" || (run.Status != domain.RunQueued && run.Status != domain.RunRunning) {
 			continue
 		}
 		if _, err := a.backend.store.TransitionRun(root, run.ID, domain.RunFailed, "render interrupted by application restart; recovering with a new run"); err != nil {

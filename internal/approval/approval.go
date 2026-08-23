@@ -106,7 +106,11 @@ func (g *FileGate) Resolve(id string, approved bool) (Decision, error) {
 }
 
 func (g *FileGate) Pending() ([]Request, error) {
-	dir, err := project.ResolveRelative(g.Root, filepath.Join(".dramaops", "approvals"))
+	root, err := filepath.Abs(g.Root)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := project.ResolveRelative(root, filepath.Join(".dramaops", "approvals"))
 	if err != nil {
 		return nil, err
 	}
@@ -116,8 +120,16 @@ func (g *FileGate) Pending() ([]Request, error) {
 	}
 	result := make([]Request, 0, len(entries))
 	for _, path := range entries {
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil, relErr
+		}
+		resolved, resolveErr := project.ResolveRelative(root, relative)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
 		var request Request
-		data, readErr := os.ReadFile(path)
+		data, readErr := os.ReadFile(resolved)
 		if readErr != nil || json.Unmarshal(data, &request) != nil {
 			continue
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
@@ -23,11 +24,16 @@ CREATE TABLE assets (id TEXT PRIMARY KEY, episode_id TEXT, shot_id TEXT, script_
 CREATE TABLE runs (id TEXT PRIMARY KEY, operation TEXT NOT NULL, status TEXT NOT NULL, episode_id TEXT, shot_id TEXT, updated_at TEXT NOT NULL, manifest_path TEXT NOT NULL);
 `
 
+var rebuildIndexMu sync.Mutex
+
 func IndexPath(root string) (string, error) {
 	return ResolveRelative(root, filepath.Join(".dramaops", "index.sqlite"))
 }
 
 func RebuildIndex(root string) error {
+	rebuildIndexMu.Lock()
+	defer rebuildIndexMu.Unlock()
+
 	snapshot, err := NewStore().Open(root)
 	if err != nil {
 		return err
@@ -39,24 +45,42 @@ func RebuildIndex(root string) error {
 	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
 		return err
 	}
-	_ = os.Remove(indexPath + "-wal")
-	_ = os.Remove(indexPath + "-shm")
-	if err := os.Remove(indexPath); err != nil && !os.IsNotExist(err) {
+	temporary, err := os.CreateTemp(filepath.Dir(indexPath), ".dramaops-index-rebuild-*.sqlite")
+	if err != nil {
+		return fmt.Errorf("create temporary index: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(temporaryPath)
 		return err
 	}
-	db, err := sql.Open("sqlite", indexPath)
+	defer func() {
+		_ = os.Remove(temporaryPath)
+		_ = os.Remove(temporaryPath + "-wal")
+		_ = os.Remove(temporaryPath + "-shm")
+	}()
+
+	db, err := sql.Open("sqlite", temporaryPath)
 	if err != nil {
 		return fmt.Errorf("open index: %w", err)
 	}
-	defer db.Close()
+	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(indexSchema); err != nil {
+		_ = db.Close()
 		return fmt.Errorf("create index schema: %w", err)
 	}
 	tx, err := db.Begin()
 	if err != nil {
+		_ = db.Close()
 		return err
 	}
-	defer tx.Rollback()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+		_ = db.Close()
+	}()
 	projectJSON, _ := json.Marshal(snapshot.Project)
 	if _, err := tx.Exec("INSERT INTO metadata(key,value) VALUES(?,?)", "project", string(projectJSON)); err != nil {
 		return err
@@ -101,7 +125,19 @@ func RebuildIndex(root string) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	if err := db.Close(); err != nil {
+		return fmt.Errorf("close rebuilt index: %w", err)
+	}
+	_ = os.Remove(indexPath + "-wal")
+	_ = os.Remove(indexPath + "-shm")
+	if err := os.Rename(temporaryPath, indexPath); err != nil {
+		return fmt.Errorf("install rebuilt index: %w", err)
+	}
+	return nil
 }
 
 func CountIndexed(root, table string) (int, error) {

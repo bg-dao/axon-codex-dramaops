@@ -853,6 +853,7 @@ label {
 }
 .lane > div {
   display: flex;
+  position: relative;
   min-width: 0;
   gap: 3px;
   border-left: 1px solid var(--line);
@@ -871,6 +872,12 @@ label {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.82rem;
+}
+.audio-cue,
+.subtitle-cue {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
 }
 .clip {
   cursor: pointer;

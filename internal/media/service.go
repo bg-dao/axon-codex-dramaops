@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bg-dao/axon-codex-dramaops/internal/approval"
@@ -37,6 +38,7 @@ type Service struct {
 	Speech       provider.SpeechProvider
 	Approval     approval.Gate
 	ResolveVoice VoiceResolver
+	runsMu       sync.Mutex
 }
 
 type Result struct {
@@ -70,6 +72,34 @@ func (s *Service) Capabilities(ctx context.Context) (provider.Capabilities, erro
 		mergeCapabilities(&result, value)
 	}
 	return result, nil
+}
+
+// RecoverInterruptedRuns leaves resumable provider video jobs alone and marks
+// synchronous or pre-submission work as failed so the creator can retry it.
+func (s *Service) RecoverInterruptedRuns() error {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	snapshot, err := s.Store.Open(s.Root)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for _, run := range snapshot.Runs {
+		if isTerminal(run.Status) || run.Operation == "episode_render" {
+			continue
+		}
+		if run.Operation == "video_generate" && run.Status == domain.RunRunning && strings.TrimSpace(run.ProviderJobID) != "" {
+			continue
+		}
+		if _, err := s.Store.TransitionRun(s.Root, run.ID, domain.RunFailed, "operation was interrupted before it could be resumed"); err != nil {
+			return err
+		}
+		changed = true
+	}
+	if changed {
+		return project.RebuildIndex(s.Root)
+	}
+	return nil
 }
 
 func mergeCapabilities(target *provider.Capabilities, source provider.Capabilities) {
@@ -128,7 +158,7 @@ func (s *Service) GenerateImage(ctx context.Context, shotID string, request prov
 		request.References = nil
 	}
 	inputs := referencesToInputs(request.References)
-	run, err := s.newRun("image_generate", shot.EpisodeID, shot.ID, "", map[string]any{
+	run, err := s.newUniqueRun("image_generate", shot.EpisodeID, shot.ID, "", map[string]any{
 		"prompt": request.Prompt, "model": request.Model, "parameters": request.Parameters, "referenceAssetIds": inputIDs(inputs),
 	})
 	if err != nil {
@@ -145,6 +175,8 @@ func (s *Service) GenerateImage(ctx context.Context, shotID string, request prov
 	if err != nil {
 		return Result{Run: s.failOrCancel(run, domain.RunFailed, err)}, err
 	}
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
 	run.ProviderJobID = job.ID
 	if err := s.Store.SaveRun(s.Root, run); err != nil {
 		return Result{}, err
@@ -158,7 +190,8 @@ func (s *Service) GenerateImage(ctx context.Context, shotID string, request prov
 			return Result{}, err
 		}
 	}
-	return Result{Run: mustTransition(s.Store, s.Root, run.ID, domain.RunSucceeded), Job: job, Asset: &asset}, nil
+	completed, err := s.completeRun(run.ID)
+	return Result{Run: completed, Job: job, Asset: &asset}, err
 }
 
 func (s *Service) GenerateVideo(ctx context.Context, shotID string, request provider.VideoRequest) (Result, error) {
@@ -182,7 +215,7 @@ func (s *Service) GenerateVideo(ctx context.Context, shotID string, request prov
 		return Result{}, err
 	}
 	inputs := referencesToInputs(request.References)
-	run, err := s.newRun("video_generate", shot.EpisodeID, shot.ID, "", map[string]any{
+	run, err := s.newUniqueRun("video_generate", shot.EpisodeID, shot.ID, "", map[string]any{
 		"prompt": request.Prompt, "model": request.Model, "parameters": request.Parameters, "inputs": inputs,
 	})
 	if err != nil {
@@ -199,6 +232,8 @@ func (s *Service) GenerateVideo(ctx context.Context, shotID string, request prov
 	if err != nil {
 		return Result{Run: s.failOrCancel(run, domain.RunFailed, err)}, err
 	}
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
 	run.ProviderJobID, run.Progress = job.ID, job.Progress
 	if err := s.Store.SaveRun(s.Root, run); err != nil {
 		return Result{}, err
@@ -214,7 +249,8 @@ func (s *Service) GenerateVideo(ctx context.Context, shotID string, request prov
 	if _, err := s.Store.SelectVideoVersion(s.Root, shot.ID, asset.ID); err != nil {
 		return Result{}, err
 	}
-	return Result{Run: mustTransition(s.Store, s.Root, run.ID, domain.RunSucceeded), Job: job, Asset: &asset}, nil
+	completed, err := s.completeRun(run.ID)
+	return Result{Run: completed, Job: job, Asset: &asset}, err
 }
 
 func (s *Service) GenerateSpeech(ctx context.Context, episodeID, blockID string, request provider.SpeechRequest) (Result, error) {
@@ -250,7 +286,7 @@ func (s *Service) GenerateSpeech(ctx context.Context, episodeID, blockID string,
 	default:
 		return Result{}, errors.New("character voice profile is invalid")
 	}
-	run, err := s.newRun("speech_generate", episode.ID, "", block.ID, map[string]any{
+	run, err := s.newUniqueRun("speech_generate", episode.ID, "", block.ID, map[string]any{
 		"model": request.Model, "parameters": request.Parameters, "voiceProfileId": character.VoiceProfile.ID,
 	})
 	if err != nil {
@@ -271,6 +307,8 @@ func (s *Service) GenerateSpeech(ctx context.Context, episodeID, blockID string,
 	if output.Len() == 0 {
 		return Result{Run: s.failOrCancel(run, domain.RunFailed, errors.New("provider returned empty speech"))}, errors.New("provider returned empty speech")
 	}
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
 	asset, err := s.persistBytes(run, domain.AssetKindAudio, "."+safeExtension(result.Format, "wav"), output.Bytes(), s.Speech.Name(), "", result.Model, request.Parameters, nil, result.ProviderRequestID)
 	if err != nil {
 		return Result{Run: s.failOrCancel(run, domain.RunFailed, err)}, err
@@ -280,16 +318,22 @@ func (s *Service) GenerateSpeech(ctx context.Context, episodeID, blockID string,
 	}
 	now := time.Now().UTC()
 	job := provider.Job{ID: run.ID, Kind: "speech", Status: provider.JobSucceeded, Progress: 100, ProviderRequestID: result.ProviderRequestID, CreatedAt: now, UpdatedAt: now}
-	return Result{Run: mustTransition(s.Store, s.Root, run.ID, domain.RunSucceeded), Job: job, Asset: &asset}, nil
+	completed, err := s.completeRun(run.ID)
+	return Result{Run: completed, Job: job, Asset: &asset}, err
 }
 
 func (s *Service) GetRun(ctx context.Context, runID string) (Result, error) {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
 	run, err := s.findRun(runID)
 	if err != nil {
 		return Result{}, err
 	}
 	if asset, found := s.assetForRun(runID); found {
 		return Result{Run: run, Job: provider.Job{ID: run.ProviderJobID, Kind: string(asset.Kind), Status: provider.JobSucceeded, Progress: 100, UpdatedAt: run.UpdatedAt}, Asset: &asset}, nil
+	}
+	if isTerminal(run.Status) {
+		return Result{Run: run}, nil
 	}
 	if run.ProviderJobID == "" || run.Operation != "video_generate" {
 		return Result{Run: run}, nil
@@ -302,7 +346,9 @@ func (s *Service) GetRun(ctx context.Context, runID string) (Result, error) {
 		return Result{Run: run}, err
 	}
 	run.Progress = job.Progress
-	_ = s.Store.SaveRun(s.Root, run)
+	if err := s.Store.SaveRun(s.Root, run); err != nil {
+		return Result{Run: run, Job: job}, err
+	}
 	switch job.Status {
 	case provider.JobSucceeded:
 		prompt, _ := run.Metadata["prompt"].(string)
@@ -319,7 +365,10 @@ func (s *Service) GetRun(ctx context.Context, runID string) (Result, error) {
 		if _, err := s.Store.SelectVideoVersion(s.Root, run.ShotID, asset.ID); err != nil {
 			return Result{}, err
 		}
-		run = mustTransition(s.Store, s.Root, run.ID, domain.RunSucceeded)
+		run, err = s.completeRun(run.ID)
+		if err != nil {
+			return Result{Run: run, Job: job, Asset: &asset}, err
+		}
 		return Result{Run: run, Job: job, Asset: &asset}, nil
 	case provider.JobFailed:
 		run = s.failOrCancel(run, domain.RunFailed, errors.New(job.Error))
@@ -330,18 +379,36 @@ func (s *Service) GetRun(ctx context.Context, runID string) (Result, error) {
 }
 
 func (s *Service) CancelRun(ctx context.Context, runID string) (Result, error) {
+	s.runsMu.Lock()
 	run, err := s.findRun(runID)
 	if err != nil {
+		s.runsMu.Unlock()
 		return Result{}, err
 	}
 	if run.Status == domain.RunSucceeded || run.Status == domain.RunFailed || run.Status == domain.RunCancelled {
+		s.runsMu.Unlock()
 		return Result{}, fmt.Errorf("run %s is already terminal", run.ID)
 	}
 	if run.Operation != "video_generate" || s.Video == nil {
+		s.runsMu.Unlock()
 		return Result{}, errors.New("only active provider video jobs can be cancelled here")
 	}
+	if strings.TrimSpace(run.ProviderJobID) == "" {
+		s.runsMu.Unlock()
+		return Result{Run: run}, errors.New("video provider job has not started yet")
+	}
+	s.runsMu.Unlock()
 	if _, err := s.Approval.Request(ctx, approval.JobCancel, "Cancel a paid generation job", map[string]any{"runId": run.ID}); err != nil {
 		return Result{Run: run}, err
+	}
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	run, err = s.findRun(runID)
+	if err != nil {
+		return Result{}, err
+	}
+	if isTerminal(run.Status) {
+		return Result{Run: run}, fmt.Errorf("run %s completed while cancellation was awaiting approval", run.ID)
 	}
 	job, err := s.Video.CancelVideoJob(ctx, run.ProviderJobID)
 	if err != nil {
@@ -655,6 +722,21 @@ func (s *Service) newRun(operation, episodeID, shotID, blockID string, metadata 
 	return run, nil
 }
 
+func (s *Service) newUniqueRun(operation, episodeID, shotID, blockID string, metadata map[string]any) (domain.Run, error) {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	current, err := s.Store.Open(s.Root)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	for _, run := range current.Runs {
+		if run.Operation == operation && run.EpisodeID == episodeID && run.ShotID == shotID && run.ScriptBlockID == blockID && !isTerminal(run.Status) {
+			return domain.Run{}, fmt.Errorf("%s is already active for this target", operation)
+		}
+	}
+	return s.newRun(operation, episodeID, shotID, blockID, metadata)
+}
+
 func (s *Service) persistDownloaded(ctx context.Context, run domain.Run, job provider.Job, kind domain.AssetKind, ext, providerName, prompt, model string, parameters map[string]any, inputs []domain.AssetInput, download func(context.Context, string, io.Writer) error) (domain.Asset, error) {
 	if asset, found := s.assetForRun(run.ID); found {
 		return asset, nil
@@ -836,10 +918,15 @@ func safeExtension(value, fallback string) string {
 	return value
 }
 
-func mustTransition(store *project.Store, root, runID string, status domain.RunStatus) domain.Run {
-	run, err := store.TransitionRun(root, runID, status, "")
-	if err == nil {
-		_ = project.RebuildIndex(root)
+func (s *Service) completeRun(runID string) (domain.Run, error) {
+	run, err := s.Store.TransitionRun(s.Root, runID, domain.RunSucceeded, "")
+	if err != nil {
+		return domain.Run{}, err
 	}
-	return run
+	_ = project.RebuildIndex(s.Root)
+	return run, nil
+}
+
+func isTerminal(status domain.RunStatus) bool {
+	return status == domain.RunSucceeded || status == domain.RunFailed || status == domain.RunCancelled
 }

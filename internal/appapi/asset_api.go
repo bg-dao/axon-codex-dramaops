@@ -39,7 +39,7 @@ func (a *AssetAPI) GenerateImage(shotID string, request provider.ImageRequest) (
 	if err != nil {
 		return media.Result{}, err
 	}
-	return service.GenerateImage(a.backend.context(), shotID, request)
+	return service.GenerateImage(a.backend.projectContext(), shotID, request)
 }
 
 func (a *AssetAPI) GenerateVideo(shotID string, request provider.VideoRequest) (media.Result, error) {
@@ -47,7 +47,7 @@ func (a *AssetAPI) GenerateVideo(shotID string, request provider.VideoRequest) (
 	if err != nil {
 		return media.Result{}, err
 	}
-	result, err := service.GenerateVideo(a.backend.context(), shotID, request)
+	result, err := service.GenerateVideo(a.backend.projectContext(), shotID, request)
 	if err == nil && result.Asset != nil {
 		_ = a.ensureContinuityFrames(*result.Asset)
 	}
@@ -59,7 +59,7 @@ func (a *AssetAPI) GenerateSpeech(episodeID, scriptBlockID string, request provi
 	if err != nil {
 		return media.Result{}, err
 	}
-	return service.GenerateSpeech(a.backend.context(), episodeID, scriptBlockID, request)
+	return service.GenerateSpeech(a.backend.projectContext(), episodeID, scriptBlockID, request)
 }
 
 func (a *AssetAPI) Capabilities() (provider.Capabilities, error) {
@@ -67,7 +67,7 @@ func (a *AssetAPI) Capabilities() (provider.Capabilities, error) {
 	if err != nil {
 		return provider.Capabilities{}, err
 	}
-	ctx, cancel := context.WithTimeout(a.backend.context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(a.backend.projectContext(), 20*time.Second)
 	defer cancel()
 	return service.Capabilities(ctx)
 }
@@ -77,7 +77,7 @@ func (a *AssetAPI) GetRun(runID string) (media.Result, error) {
 	if err != nil {
 		return media.Result{}, err
 	}
-	ctx, cancel := context.WithTimeout(a.backend.context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(a.backend.projectContext(), 30*time.Second)
 	defer cancel()
 	result, err := service.GetRun(ctx, runID)
 	if err == nil && result.Asset != nil && result.Asset.Kind == domain.AssetKindVideo {
@@ -91,7 +91,7 @@ func (a *AssetAPI) CancelRun(runID string) (media.Result, error) {
 	if err != nil {
 		return media.Result{}, err
 	}
-	return service.CancelRun(a.backend.context(), runID)
+	return service.CancelRun(a.backend.projectContext(), runID)
 }
 
 func (a *AssetAPI) PendingApprovals() ([]approval.Request, error) {
@@ -255,10 +255,10 @@ func (a *AssetAPI) CreateCustomVoice(characterID, consentPath, samplePath string
 	if err != nil {
 		return VoiceBindingStatus{}, err
 	}
-	if _, err := gate.Request(a.backend.context(), approval.VoiceCreate, "Create a paid custom voice with confirmed authorization", map[string]any{"characterId": character.ID, "voiceProfileId": character.VoiceProfile.ID}); err != nil {
+	if _, err := gate.Request(a.backend.projectContext(), approval.VoiceCreate, "Create a paid custom voice with confirmed authorization", map[string]any{"characterId": character.ID, "voiceProfileId": character.VoiceProfile.ID}); err != nil {
 		return VoiceBindingStatus{}, err
 	}
-	result, err := a.backend.speechProvider.CreateCustomVoice(a.backend.context(), provider.CustomVoiceRequest{Name: character.Name, Language: snapshot.Project.ContentLanguage, ConsentPath: consentPath, SamplePath: samplePath, Confirmed: true})
+	result, err := a.backend.speechProvider.CreateCustomVoice(a.backend.projectContext(), provider.CustomVoiceRequest{Name: character.Name, Language: snapshot.Project.ContentLanguage, ConsentPath: consentPath, SamplePath: samplePath, Confirmed: true})
 	if err != nil {
 		return VoiceBindingStatus{}, err
 	}
@@ -429,7 +429,7 @@ func (a *AssetAPI) ensureContinuityFrames(video domain.Asset) error {
 	if !strings.EqualFold(actualHash, video.SHA256) {
 		return fmt.Errorf("video asset %s failed SHA-256 verification", video.ID)
 	}
-	info, err := renderengine.Probe(a.backend.context(), runtime, source)
+	info, err := renderengine.Probe(a.backend.projectContext(), runtime, source)
 	if err != nil {
 		return err
 	}
@@ -453,7 +453,7 @@ func (a *AssetAPI) ensureContinuityFrames(video domain.Asset) error {
 			return err
 		}
 		temporary := filepath.Join(temporaryDir, role+".png")
-		extractErr := renderengine.ExtractFrame(a.backend.context(), runtime, source, positions[role], temporary)
+		extractErr := renderengine.ExtractFrame(a.backend.projectContext(), runtime, source, positions[role], temporary)
 		if extractErr != nil {
 			_ = os.RemoveAll(temporaryDir)
 			return extractErr

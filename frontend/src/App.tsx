@@ -2009,6 +2009,8 @@ function Timeline({
   );
   const width = (seconds: number) =>
     `${Math.max(4, (seconds / duration) * 100)}%`;
+  const position = (seconds: number) =>
+    `${Math.max(0, Math.min(100, (seconds / duration) * 100))}%`;
   return (
     <div className="timeline">
       <div className="lane">
@@ -2018,7 +2020,13 @@ function Timeline({
             <button
               key={clip.id}
               className={selected === clip.id ? "clip selected" : "clip"}
-              style={{ width: width(clip.outSeconds - clip.inSeconds) }}
+              style={{
+                width: width(
+                  clip.outSeconds -
+                    clip.inSeconds -
+                    (clip.transitionSeconds ?? 0),
+                ),
+              }}
               onClick={() => onSelect(clip.id)}
             >
               {clip.order + 1}
@@ -2038,7 +2046,7 @@ function Timeline({
                   key={cue.id}
                   className={`audio-cue ${lane}`}
                   style={{
-                    marginLeft: width(cue.startSeconds),
+                    left: position(cue.startSeconds),
                     width: width(cue.durationSeconds),
                   }}
                 >
@@ -2056,7 +2064,7 @@ function Timeline({
               key={cue.id}
               className="subtitle-cue"
               style={{
-                marginLeft: width(cue.startSeconds),
+                left: position(cue.startSeconds),
                 width: width(cue.durationSeconds),
               }}
             >

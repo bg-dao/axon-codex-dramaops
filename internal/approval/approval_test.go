@@ -2,7 +2,10 @@ package approval
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,5 +49,26 @@ func TestFileGateRequiresFreshDecision(t *testing.T) {
 	}
 	if remaining, _ := gate.Pending(); len(remaining) != 0 {
 		t.Fatalf("resolved approval remained pending: %v", remaining)
+	}
+}
+
+func TestPendingRejectsSymlinkedApprovalRequest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink privileges vary")
+	}
+	root := filepath.Join(t.TempDir(), "project")
+	if _, err := project.NewStore().Create(root, "Approval boundary"); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.request.json")
+	if err := os.WriteFile(outside, []byte(`{"id":"outside","action":"image_generate","summary":"outside","requestedAt":"2026-01-01T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, ".dramaops", "approvals", "outside.request.json")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFileGate(root).Pending(); err == nil || !strings.Contains(err.Error(), "symlink paths are not allowed") {
+		t.Fatalf("symlinked approval request must fail closed: %v", err)
 	}
 }
