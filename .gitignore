@@ -1,0 +1,16 @@
+.DS_Store
+.idea/
+.vscode/
+build/bin/
+build/darwin/
+frontend/node_modules/
+frontend/dist/
+coverage/
+*.log
+*.tmp
+.env
+.env.*
+!.env.example
+
+# SceneOps project-local runtime data
+.sceneops/

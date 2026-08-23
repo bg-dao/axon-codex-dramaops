@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "scene-03",
+  "title": "First light",
+  "summary": "The message resolves as the train emerges above the fog at dawn.",
+  "order": 2,
+  "shotIds": ["shot-05", "shot-06"],
+  "createdAt": "2026-08-23T00:00:00Z",
+  "updatedAt": "2026-08-23T00:00:00Z"
+}
