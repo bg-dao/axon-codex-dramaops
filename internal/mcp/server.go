@@ -76,7 +76,7 @@ func (s *Server) handle(ctx context.Context, message request) (any, *rpcError) {
 		return map[string]any{
 			"protocolVersion": ProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
-			"serverInfo":      map[string]any{"name": "sceneops", "version": "0.1.0"},
+			"serverInfo":      map[string]any{"name": "dramaops", "version": "0.2.0"},
 		}, nil
 	case "ping":
 		return map[string]any{}, nil

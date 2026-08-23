@@ -1,10 +1,1 @@
-{
-  "schemaVersion": 1,
-  "id": "scene-03",
-  "title": "First light",
-  "summary": "The message resolves as the train emerges above the fog at dawn.",
-  "order": 2,
-  "shotIds": ["shot-05", "shot-06"],
-  "createdAt": "2026-08-23T00:00:00Z",
-  "updatedAt": "2026-08-23T00:00:00Z"
-}
+{"schemaVersion":1,"id":"scene-03","episodeId":"episode-001","title":"EXT. RIDGE ABOVE THE FOG - DAWN","summary":"A dark transmitter turns on and transforms the recording into a new mystery.","locationId":"location-ridge","timeOfDay":"dawn","order":2,"shotIds":["shot-07","shot-08"],"createdAt":"2026-08-23T00:00:00Z","updatedAt":"2026-08-23T00:00:00Z"}

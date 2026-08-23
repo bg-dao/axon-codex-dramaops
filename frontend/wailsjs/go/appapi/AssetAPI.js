@@ -10,12 +10,24 @@ export function Capabilities() {
   return window['go']['appapi']['AssetAPI']['Capabilities']();
 }
 
+export function ChooseAudioFile(arg1) {
+  return window['go']['appapi']['AssetAPI']['ChooseAudioFile'](arg1);
+}
+
+export function CreateCustomVoice(arg1, arg2, arg3, arg4) {
+  return window['go']['appapi']['AssetAPI']['CreateCustomVoice'](arg1, arg2, arg3, arg4);
+}
+
 export function DataURL(arg1) {
   return window['go']['appapi']['AssetAPI']['DataURL'](arg1);
 }
 
 export function GenerateImage(arg1, arg2) {
   return window['go']['appapi']['AssetAPI']['GenerateImage'](arg1, arg2);
+}
+
+export function GenerateSpeech(arg1, arg2, arg3) {
+  return window['go']['appapi']['AssetAPI']['GenerateSpeech'](arg1, arg2, arg3);
 }
 
 export function GenerateVideo(arg1, arg2) {
@@ -26,8 +38,8 @@ export function GetRun(arg1) {
   return window['go']['appapi']['AssetAPI']['GetRun'](arg1);
 }
 
-export function Import(arg1, arg2, arg3) {
-  return window['go']['appapi']['AssetAPI']['Import'](arg1, arg2, arg3);
+export function ImportDialogue(arg1, arg2) {
+  return window['go']['appapi']['AssetAPI']['ImportDialogue'](arg1, arg2);
 }
 
 export function ImportExternalVideo(arg1) {
@@ -38,6 +50,10 @@ export function ImportReference(arg1) {
   return window['go']['appapi']['AssetAPI']['ImportReference'](arg1);
 }
 
+export function ImportSound(arg1, arg2) {
+  return window['go']['appapi']['AssetAPI']['ImportSound'](arg1, arg2);
+}
+
 export function PendingApprovals() {
   return window['go']['appapi']['AssetAPI']['PendingApprovals']();
 }
@@ -46,6 +62,14 @@ export function ResolveApproval(arg1, arg2) {
   return window['go']['appapi']['AssetAPI']['ResolveApproval'](arg1, arg2);
 }
 
-export function SelectVersion(arg1, arg2) {
-  return window['go']['appapi']['AssetAPI']['SelectVersion'](arg1, arg2);
+export function SelectKeyframe(arg1, arg2) {
+  return window['go']['appapi']['AssetAPI']['SelectKeyframe'](arg1, arg2);
+}
+
+export function SelectVideo(arg1, arg2) {
+  return window['go']['appapi']['AssetAPI']['SelectVideo'](arg1, arg2);
+}
+
+export function VoiceBinding(arg1) {
+  return window['go']['appapi']['AssetAPI']['VoiceBinding'](arg1);
 }

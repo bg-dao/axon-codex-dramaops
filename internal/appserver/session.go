@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/project"
-	codexruntime "github.com/bg-dao/axon-codex-sceneops/internal/runtime"
+	"github.com/bg-dao/axon-codex-dramaops/internal/project"
+	codexruntime "github.com/bg-dao/axon-codex-dramaops/internal/runtime"
 )
 
 type Session struct {
@@ -104,7 +104,7 @@ func (s *Session) boot() error {
 		}, &resumed)
 		cancel()
 		if resumeErr != nil {
-			s.onEventSafe(Event{Method: "sceneops/thread/resumeFailed", Params: mustJSON(map[string]any{"threadId": snapshot.Project.ActiveThreadID, "message": resumeErr.Error()}), Timestamp: time.Now().UTC()})
+			s.onEventSafe(Event{Method: "dramaops/thread/resumeFailed", Params: mustJSON(map[string]any{"threadId": snapshot.Project.ActiveThreadID, "message": resumeErr.Error()}), Timestamp: time.Now().UTC()})
 		}
 	}
 	go s.monitor(client)
@@ -121,20 +121,20 @@ func (s *Session) monitor(client *Client) {
 	if s.restarts >= 1 {
 		s.client = nil
 		s.mu.Unlock()
-		s.onEventSafe(Event{Method: "sceneops/runtime/failed", Params: mustJSON(map[string]any{"message": "Codex app-server exited after its one automatic restart"}), Timestamp: time.Now().UTC()})
+		s.onEventSafe(Event{Method: "dramaops/runtime/failed", Params: mustJSON(map[string]any{"message": "Codex app-server exited after its one automatic restart"}), Timestamp: time.Now().UTC()})
 		return
 	}
 	s.restarts++
 	s.client = nil
 	s.mu.Unlock()
-	s.onEventSafe(Event{Method: "sceneops/runtime/restarting", Params: mustJSON(map[string]any{"attempt": 1}), Timestamp: time.Now().UTC()})
+	s.onEventSafe(Event{Method: "dramaops/runtime/restarting", Params: mustJSON(map[string]any{"attempt": 1}), Timestamp: time.Now().UTC()})
 	select {
 	case <-s.ctx.Done():
 		return
 	case <-time.After(350 * time.Millisecond):
 	}
 	if err := s.boot(); err != nil {
-		s.onEventSafe(Event{Method: "sceneops/runtime/failed", Params: mustJSON(map[string]any{"message": err.Error()}), Timestamp: time.Now().UTC()})
+		s.onEventSafe(Event{Method: "dramaops/runtime/failed", Params: mustJSON(map[string]any{"message": err.Error()}), Timestamp: time.Now().UTC()})
 	}
 }
 
@@ -176,9 +176,9 @@ func (s *Session) EnsureThread(ctx context.Context) (Thread, error) {
 	var started ThreadResult
 	if err := client.Request(ctx, "thread/start", map[string]any{
 		"cwd":            s.root,
-		"approvalPolicy": "on-request",
+		"approvalPolicy": "onRequest",
 		"sandbox":        "workspaceWrite",
-		"serviceName":    "sceneops",
+		"serviceName":    "dramaops",
 	}, &started); err != nil {
 		return Thread{}, err
 	}
@@ -209,7 +209,7 @@ func (s *Session) StartTurn(ctx context.Context, prompt string) (Turn, error) {
 		"threadId":       thread.ID,
 		"input":          []map[string]any{{"type": "text", "text": prompt}},
 		"cwd":            s.root,
-		"approvalPolicy": "on-request",
+		"approvalPolicy": "onRequest",
 		"sandboxPolicy": map[string]any{
 			"type":          "workspaceWrite",
 			"writableRoots": []string{s.root},
@@ -279,8 +279,8 @@ func AppServerArgs(mcpCommand, projectRoot string) []string {
 	return []string{
 		"app-server",
 		"--stdio",
-		"--config", fmt.Sprintf("mcp_servers.sceneops.command=%s", quoted(mcpCommand)),
-		"--config", fmt.Sprintf("mcp_servers.sceneops.args=%s", argsValue),
-		"--config", "mcp_servers.sceneops.required=true",
+		"--config", fmt.Sprintf("mcp_servers.dramaops.command=%s", quoted(mcpCommand)),
+		"--config", fmt.Sprintf("mcp_servers.dramaops.args=%s", argsValue),
+		"--config", "mcp_servers.dramaops.required=true",
 	}
 }

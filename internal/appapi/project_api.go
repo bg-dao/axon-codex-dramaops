@@ -1,12 +1,11 @@
 package appapi
 
 import (
-	"errors"
 	"strings"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/domain"
-	"github.com/bg-dao/axon-codex-sceneops/internal/exporter"
-	"github.com/bg-dao/axon-codex-sceneops/internal/project"
+	"github.com/bg-dao/axon-codex-dramaops/internal/domain"
+	"github.com/bg-dao/axon-codex-dramaops/internal/exporter"
+	"github.com/bg-dao/axon-codex-dramaops/internal/project"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -16,13 +15,13 @@ func NewProjectAPI(backend *Backend) *ProjectAPI { return &ProjectAPI{backend: b
 
 func (a *ProjectAPI) ChooseDirectory(title string) (string, error) {
 	if strings.TrimSpace(title) == "" {
-		title = "Choose a SceneOps project folder"
+		title = "Choose a DramaOps series folder"
 	}
 	return wailsruntime.OpenDirectoryDialog(a.backend.context(), wailsruntime.OpenDialogOptions{Title: title})
 }
 
-func (a *ProjectAPI) Create(root, name string) (domain.Snapshot, error) {
-	snapshot, err := a.backend.store.Create(root, name)
+func (a *ProjectAPI) Create(root string, options project.CreateOptions) (domain.Snapshot, error) {
+	snapshot, err := a.backend.store.CreateWithOptions(root, options)
 	if err != nil {
 		return domain.Snapshot{}, err
 	}
@@ -52,62 +51,29 @@ func (a *ProjectAPI) Current() (domain.Snapshot, error) {
 	return a.backend.store.Open(root)
 }
 
-func (a *ProjectAPI) SaveBrief(markdown string) (domain.Snapshot, error) {
+func (a *ProjectAPI) SaveSettings(projectManifest domain.Project) (domain.Snapshot, error) {
 	root, err := a.backend.Root()
 	if err != nil {
 		return domain.Snapshot{}, err
 	}
-	if err := a.backend.store.SaveBrief(root, markdown); err != nil {
-		return domain.Snapshot{}, err
-	}
-	snapshot, err := a.Current()
-	if err == nil {
-		a.backend.emit(EventProjectChanged, snapshot)
-	}
-	return snapshot, err
-}
-
-func (a *ProjectAPI) SaveScene(scene domain.Scene) (domain.Snapshot, error) {
-	root, err := a.backend.Root()
+	current, err := a.backend.store.Open(root)
 	if err != nil {
 		return domain.Snapshot{}, err
 	}
-	if err := a.backend.store.SaveScene(root, scene); err != nil {
+	// Settings owns only content language and output. Preserve the active Codex
+	// thread and series bibles even if the UI submitted an older snapshot.
+	current.Project.ContentLanguage = projectManifest.ContentLanguage
+	current.Project.Output = projectManifest.Output
+	if err := a.backend.store.SaveProject(root, current.Project); err != nil {
 		return domain.Snapshot{}, err
 	}
-	if err := project.RebuildIndex(root); err != nil {
-		return domain.Snapshot{}, err
+	for _, edit := range current.Edits {
+		edit.Output = current.Project.Output
+		if err := a.backend.store.SaveEdit(root, edit); err != nil {
+			return domain.Snapshot{}, err
+		}
 	}
-	return a.Current()
-}
-
-func (a *ProjectAPI) SaveShot(shot domain.Shot) (domain.Snapshot, error) {
-	root, err := a.backend.Root()
-	if err != nil {
-		return domain.Snapshot{}, err
-	}
-	if err := a.backend.store.SaveShot(root, shot); err != nil {
-		return domain.Snapshot{}, err
-	}
-	if err := project.RebuildIndex(root); err != nil {
-		return domain.Snapshot{}, err
-	}
-	return a.Current()
-}
-
-func (a *ProjectAPI) ApplyStoryboard(scenes []domain.Scene, shots []domain.Shot, approved bool) (domain.Snapshot, error) {
-	if !approved {
-		return domain.Snapshot{}, errors.New("storyboard write requires explicit approval")
-	}
-	root, err := a.backend.Root()
-	if err != nil {
-		return domain.Snapshot{}, err
-	}
-	snapshot, err := a.backend.store.ApplyStoryboard(root, scenes, shots)
-	if err == nil {
-		a.backend.emit(EventProjectChanged, snapshot)
-	}
-	return snapshot, err
+	return a.refresh(root)
 }
 
 func (a *ProjectAPI) RebuildIndex() error {
@@ -124,4 +90,15 @@ func (a *ProjectAPI) Export() (exporter.Result, error) {
 		return exporter.Result{}, err
 	}
 	return exporter.Project(root)
+}
+
+func (a *ProjectAPI) refresh(root string) (domain.Snapshot, error) {
+	if err := project.RebuildIndex(root); err != nil {
+		return domain.Snapshot{}, err
+	}
+	snapshot, err := a.backend.store.Open(root)
+	if err == nil {
+		a.backend.emit(EventProjectChanged, snapshot)
+	}
+	return snapshot, err
 }

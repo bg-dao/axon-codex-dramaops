@@ -2,14 +2,25 @@ package secret
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/zalando/go-keyring"
 )
 
 const (
-	ServiceName    = "dev.bg-dao.sceneops"
+	ServiceName    = "dev.bg-dao.dramaops"
 	OpenAIKeyEntry = "openai-media-api-key"
 )
+
+func VoiceBindingEntry(profileID string) string { return fmt.Sprintf("voice-profile:%s", profileID) }
+func VoiceConsentEntry(profileID string) string { return fmt.Sprintf("voice-consent:%s", profileID) }
+
+func ResolveVoiceBinding(store Store, profileID string) (string, error) {
+	if !store.Exists(VoiceConsentEntry(profileID)) {
+		return "", ErrNotFound
+	}
+	return store.Get(VoiceBindingEntry(profileID))
+}
 
 var ErrNotFound = errors.New("secret not found")
 

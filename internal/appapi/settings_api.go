@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/provider"
-	"github.com/bg-dao/axon-codex-sceneops/internal/secret"
+	"github.com/bg-dao/axon-codex-dramaops/internal/media"
+	"github.com/bg-dao/axon-codex-dramaops/internal/provider"
+	"github.com/bg-dao/axon-codex-dramaops/internal/secret"
 )
 
 type SettingsStatus struct {
@@ -33,5 +34,5 @@ func (a *SettingsAPI) DeleteOpenAIKey() error {
 func (a *SettingsAPI) ProbeCapabilities() (provider.Capabilities, error) {
 	ctx, cancel := context.WithTimeout(a.backend.context(), 20*time.Second)
 	defer cancel()
-	return a.backend.provider.Capabilities(ctx)
+	return (&media.Service{Image: a.backend.imageProvider, Video: a.backend.videoProvider, Speech: a.backend.speechProvider}).Capabilities(ctx)
 }

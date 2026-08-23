@@ -1,120 +1,128 @@
-# SceneOps by Axon
+# DramaOps by Axon
 
 English | [简体中文](README.zh-CN.md)
 
-**SceneOps — An open-source multimodal scene and asset workbench powered by the Codex agent harness.**
+**DramaOps — An open-source AI short-drama production workbench powered by the Codex agent harness.**
 
-SceneOps is a local-first desktop workbench for independent creators. It turns a brief into a structured storyboard, keyframes, video shots, version decisions, and an exportable asset/provenance package while keeping project files understandable and portable.
+DramaOps is a local-first desktop workbench for producing consistent AI short dramas. It connects structured scripts, character and location bibles, professional shot plans, reference-aware keyframes, video clips, locked character voices, sound, subtitles, a fixed story timeline, continuity checks, and reproducible exports.
 
-> Status: v0.1 core workflow implemented. Real OpenAI media calls remain manual opt-in while packaging and creator examples are still in progress.
+> Status: v0.2 alpha implementation. The core project, agent, media, voice, continuity, timeline, render, and export paths are implemented. Real provider calls remain manual opt-in, and signed distribution is not yet a stable release.
 
-## Why SceneOps
-
-- **Agent-native workflow:** Codex app-server provides login, durable threads, turns, streaming events, and human approvals.
-- **Local-first projects:** JSON manifests and media files are the source of truth; SQLite is only a rebuildable index.
-- **Provider-independent assets:** provider and model details live in provenance, not in the core project schema.
-- **Human-controlled spend:** storyboard writes and paid media actions require an explicit approval each time.
-- **Portable output:** exported projects retain prompts, parameters, parent relationships, hashes, and provider request IDs.
-
-## v0.1 workflow
+## Core workflow
 
 ```text
-Brief -> Storyboard -> Keyframe versions -> Select -> Generate or import video -> Export
+Series setup → Episode script → Story bible → Shot plan → Keyframes
+→ Video clips → Dialogue and sound → Fixed timeline → Continuity check → Export
 ```
 
-The desktop workflow is intentionally guided and small:
+DramaOps defaults to vertical short drama: `9:16`, `1080×1920`, `25fps`, and roughly 1–3 minutes per episode. Landscape projects are also supported.
 
-1. Choose a local folder and create or open a project.
-2. Write and explicitly save `brief.md`.
-3. Ask the Codex agent to create the initial 3-scene / 6-shot storyboard through the SceneOps MCP tools.
-4. Approve the storyboard write once.
-5. Generate keyframe versions, attach reference images, and select the preferred image.
-6. Import a finished video or use a capability-gated video provider.
-7. Export deterministic manifests, media, runs, and provenance with a package SHA-256.
+- **Series-level continuity:** reuse characters, Voice Profiles, locations, props, visual style, ambience, motifs, and BGM across episodes.
+- **Structured story truth:** episode JSON is canonical; Fountain can be imported and regenerated without becoming a second source of truth.
+- **Professional shots:** shot size, angle, movement, lens, composition, focus, blocking, lighting, screen direction, eye line, wardrobe, props, and transitions are explicit.
+- **Reference-aware generation:** keyframe requests assemble relevant style, character, location, prop, and shot references. Video requests prefer the selected keyframe.
+- **Voice consistency:** each character is locked to one built-in, custom, or external Voice Profile. Custom provider voice and consent IDs stay in macOS Keychain.
+- **Focused editing:** one ordered video track plus dialogue, SFX, BGM, and subtitle lanes—without turning DramaOps into a general-purpose NLE.
+- **Reproducible delivery:** MP4, SRT, Fountain, manifests, continuity report, hashes, and provenance are exported together.
 
-Approvals appear in the active workspace as well as the Runs page. Paid generation and cancellation never have a permanent allow option.
+## Codex agent harness
 
-The first release targets macOS on Apple Silicon. Windows-compatible boundaries are retained, but Windows packaging is not a v0.1 release gate.
+The Codex agent handles structured script, story-bible, and shot-plan work. Media generation, voice generation, timeline changes, and rendering remain explicit user actions.
+
+DramaOps talks directly to `codex app-server` over JSONL/JSON-RPC. One app-server process is associated with the active project, using the project root as `cwd`, `workspaceWrite` sandboxing, and `onRequest` approval. The app injects its stdio MCP server with temporary command-line configuration and does not modify the user's global Codex configuration.
+
+The public MCP contract contains eight tools:
+
+```text
+dramaops_project_read       dramaops_script_apply
+dramaops_shotplan_apply     dramaops_image_generate
+dramaops_video_generate     dramaops_speech_generate
+dramaops_job_status         dramaops_job_cancel
+```
+
+Agent script and shot-plan writes, paid media or custom-voice operations, and provider-job cancellation require a fresh one-time approval. There is no permanent approval for paid actions.
+
+## Local-first project and render model
+
+JSON manifests and media bytes are durable truth. `.dramaops/index.sqlite` is a disposable index and can be deleted and rebuilt without losing project data.
+
+The local render engine uses `ffprobe` for media validation and FFmpeg for trim, conform, cut/dissolve/fade transitions, subtitle burn-in, dialogue/SFX/BGM mix, BGM ducking, loudness normalization, and H.264/AAC output. The default target is 1080×1920, 25fps, 48kHz stereo, `-16 LUFS`, and `-1 dBTP`.
+
+OpenAI is the first image and speech provider. GPT Image uses multi-reference image editing when references exist. Video generation is capability-gated and experimental; external video import is the stable path because the [OpenAI Videos API](https://developers.openai.com/api/reference/typescript/resources/videos/methods/create) is deprecated and scheduled to shut down on September 24, 2026.
 
 ## Architecture
 
 ```text
 React + TypeScript UI
-        |
-Wails-generated bindings and events
-        |
+        │ Wails-generated bindings and dramaops:* events
 Go application services
-  |              |                 |
-Project store    Codex app-server  MediaProvider
-(JSON + media)   (JSONL JSON-RPC)  (OpenAI first)
-  |              |
-SQLite index     SceneOps stdio MCP
+   ├── Project store + rebuildable SQLite index
+   ├── Codex app-server + DramaOps stdio MCP
+   ├── Image / Video / Speech provider capabilities
+   └── FFmpeg fixed-timeline render engine
 ```
 
-SceneOps starts one Codex app-server per active project. It passes the project root as `cwd`, uses the `workspaceWrite` sandbox and `on-request` approval policy, and injects the SceneOps MCP server with command-line config overrides. SceneOps never modifies the user's global Codex config.
+Provider and model names live in provenance and adapters, not in the core schema. The OpenAI media key and custom voice/consent bindings are stored separately in macOS Keychain under service `dev.bg-dao.dramaops`; plaintext secrets never enter snapshots, manifests, logs, SQLite, or exports.
 
 ## Develop
 
-Prerequisites:
+Requirements:
 
-- Go 1.25 or newer
-- Node.js 20 or newer
-- Wails 2.15 or newer
+- Go 1.25+
+- Node.js 20+
+- Wails 2.15+
 - Codex CLI with `app-server` support
+- FFmpeg with `h264_videotoolbox` for local macOS rendering
 
 ```bash
-npm --prefix frontend install
+npm --prefix frontend ci
 npm --prefix frontend test
 npm --prefix frontend run build
 go test -race ./...
 wails dev
 ```
 
-To run the MCP server directly:
+Run the MCP server directly:
 
 ```bash
-go run ./cmd/sceneops-mcp --project /absolute/path/to/a/sceneops/project
+go run ./cmd/dramaops-mcp --project /absolute/path/to/a/dramaops/project
 ```
 
-To run the real app-server walking-skeleton gate without making project changes:
+Run the real app-server smoke gate without changing project files:
 
 ```bash
-go run ./cmd/sceneops-harness-smoke \
-  --project /absolute/path/to/a/sceneops/project \
-  --mcp-command /absolute/path/to/SceneOps \
-  --prompt "Reply with exactly: SceneOps harness ready. Do not call tools or modify files."
+go run ./cmd/dramaops-harness-smoke \
+  --project /absolute/path/to/a/dramaops/project \
+  --mcp-command /absolute/path/to/DramaOps \
+  --prompt "Reply with exactly: DramaOps harness ready. Do not call tools or modify files."
 ```
 
-This uses the pinned verified runtime by default. The smoke command's prerelease compatibility flags are diagnostic-only and are not used by the desktop application.
-
-OpenAI media generation uses a separate API key stored by the operating system keychain under service `dev.bg-dao.sceneops`. The key is never written to a SceneOps project, SQLite index, log, or export.
-
-Video import is the stable v0.1 path. The current OpenAI Videos adapter is marked experimental because the [official API](https://developers.openai.com/api/reference/typescript/resources/videos/methods/create) is deprecated and scheduled to shut down on September 24, 2026. Its optional image input uses the selected keyframe, while provider-neutral asset lineage remains valid when another adapter replaces it.
+Default tests never make real OpenAI calls.
 
 ## Project layout
 
 ```text
-my-film/
-├── sceneops.project.json
-├── brief.md
-├── AGENTS.md
-├── scenes/
-├── shots/
+my-series/
+├── dramaops.project.json
+├── episodes/<episode-id>/episode.json
+├── episodes/<episode-id>/edit.json
+├── characters/<character-id>.json
+├── locations/<location-id>.json
+├── props/<prop-id>.json
+├── scenes/<scene-id>.json
+├── shots/<shot-id>.json
 ├── assets/<asset-id>/asset.json
 ├── runs/<run-id>.json
+├── renders/
 ├── exports/
-└── .sceneops/index.sqlite
+└── .dramaops/index.sqlite
 ```
 
-See [docs/architecture.md](docs/architecture.md), [docs/project-format.md](docs/project-format.md), and [docs/security.md](docs/security.md) for the contracts behind the implementation.
-
-## Relationship to Axon
-
-SceneOps is developed as a self-contained open-source project under Axon. Its source, dependencies, CI, releases, and public roadmap live in this repository.
+See [the example series](examples/README.md), [architecture](docs/architecture.md), [project format](docs/project-format.md), [security model](docs/security.md), and [release gates](docs/release.md).
 
 ## Contributing and security
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow. Please report vulnerabilities according to [SECURITY.md](SECURITY.md), not in public issues.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities through [private vulnerability reporting](SECURITY.md), not public issues.
 
 ## License
 

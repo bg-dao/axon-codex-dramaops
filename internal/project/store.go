@@ -13,13 +13,35 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/domain"
+	"github.com/bg-dao/axon-codex-dramaops/internal/continuity"
+	"github.com/bg-dao/axon-codex-dramaops/internal/domain"
 	"github.com/google/uuid"
 )
 
-const ProjectManifest = "sceneops.project.json"
+const ProjectManifest = "dramaops.project.json"
 
-const MaxBriefBytes = 1 << 20
+type CreateOptions struct {
+	Name            string             `json:"name"`
+	ContentLanguage string             `json:"contentLanguage"`
+	Orientation     domain.Orientation `json:"orientation"`
+}
+
+type ImportOptions struct {
+	Source        string              `json:"source"`
+	EpisodeID     string              `json:"episodeId,omitempty"`
+	ShotID        string              `json:"shotId,omitempty"`
+	ScriptBlockID string              `json:"scriptBlockId,omitempty"`
+	Kind          domain.AssetKind    `json:"kind"`
+	Inputs        []domain.AssetInput `json:"inputs,omitempty"`
+}
+
+type ScriptPlan struct {
+	Episode    domain.Episode     `json:"episode"`
+	Scenes     []domain.Scene     `json:"scenes"`
+	Characters []domain.Character `json:"characters,omitempty"`
+	Locations  []domain.Location  `json:"locations,omitempty"`
+	Props      []domain.Prop      `json:"props,omitempty"`
+}
 
 type Store struct {
 	now func() time.Time
@@ -28,43 +50,76 @@ type Store struct {
 func NewStore() *Store { return &Store{now: func() time.Time { return time.Now().UTC() }} }
 
 func (s *Store) Create(root, name string) (domain.Snapshot, error) {
-	if strings.TrimSpace(name) == "" {
-		return domain.Snapshot{}, errors.New("project name is required")
+	return s.CreateWithOptions(root, CreateOptions{Name: name, ContentLanguage: "zh-CN", Orientation: domain.OrientationPortrait})
+}
+
+func (s *Store) CreateWithOptions(root string, options CreateOptions) (domain.Snapshot, error) {
+	if strings.TrimSpace(options.Name) == "" {
+		return domain.Snapshot{}, errors.New("series name is required")
+	}
+	if options.Orientation == "" {
+		options.Orientation = domain.OrientationPortrait
+	}
+	if options.Orientation != domain.OrientationPortrait && options.Orientation != domain.OrientationLandscape {
+		return domain.Snapshot{}, fmt.Errorf("unsupported orientation %q", options.Orientation)
+	}
+	if strings.TrimSpace(options.ContentLanguage) == "" {
+		options.ContentLanguage = "zh-CN"
 	}
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return domain.Snapshot{}, fmt.Errorf("resolve root: %w", err)
 	}
-	manifestPath := filepath.Join(absRoot, ProjectManifest)
-	if _, err := os.Lstat(manifestPath); err == nil {
-		return domain.Snapshot{}, fmt.Errorf("a SceneOps project already exists at %s", absRoot)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return domain.Snapshot{}, fmt.Errorf("inspect project manifest: %w", err)
-	}
 	if err := os.MkdirAll(absRoot, 0o755); err != nil {
 		return domain.Snapshot{}, fmt.Errorf("create project root: %w", err)
 	}
-	for _, rel := range []string{"scenes", "shots", "assets", "runs", "exports", ".sceneops", ".sceneops/approvals"} {
-		path, err := ResolveRelative(absRoot, rel)
-		if err != nil {
-			return domain.Snapshot{}, err
+	manifestPath, err := ResolveRelative(absRoot, ProjectManifest)
+	if err != nil {
+		return domain.Snapshot{}, err
+	}
+	if _, err := os.Lstat(manifestPath); err == nil {
+		return domain.Snapshot{}, fmt.Errorf("a DramaOps series already exists at %s", absRoot)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return domain.Snapshot{}, fmt.Errorf("inspect project manifest: %w", err)
+	}
+	for _, rel := range []string{
+		"episodes", "characters", "locations", "props", "scenes", "shots", "assets", "runs",
+		"renders", "exports", ".dramaops", ".dramaops/approvals",
+	} {
+		path, pathErr := ResolveRelative(absRoot, rel)
+		if pathErr != nil {
+			return domain.Snapshot{}, pathErr
 		}
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return domain.Snapshot{}, fmt.Errorf("create %s: %w", rel, err)
 		}
 	}
 	now := s.now()
+	episodeID := "episode-001"
 	manifest := domain.Project{
 		SchemaVersion: domain.SchemaVersion,
-		ID:            uuid.NewString(),
-		Name:          strings.TrimSpace(name),
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:            uuid.NewString(), Name: strings.TrimSpace(options.Name),
+		ContentLanguage: strings.TrimSpace(options.ContentLanguage), ActiveEpisodeID: episodeID,
+		SoundPalette: domain.SoundPalette{Motifs: map[string]string{}},
+		Output:       domain.DefaultOutputSettings(options.Orientation),
+		CreatedAt:    now, UpdatedAt: now,
 	}
 	if err := s.SaveProject(absRoot, manifest); err != nil {
 		return domain.Snapshot{}, err
 	}
-	if err := writeIfMissing(filepath.Join(absRoot, "brief.md"), "# Creative brief\n\n"); err != nil {
+	episode := domain.Episode{
+		SchemaVersion: domain.SchemaVersion, ID: episodeID, Number: 1,
+		Title: localize(options.ContentLanguage, "第一集", "Episode 1"), Status: domain.EpisodeDraft,
+		SceneIDs: []string{}, ScriptBlocks: []domain.ScriptBlock{}, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.SaveEpisode(absRoot, episode); err != nil {
+		return domain.Snapshot{}, err
+	}
+	if err := s.SaveEdit(absRoot, domain.EpisodeEdit{
+		SchemaVersion: domain.SchemaVersion, EpisodeID: episodeID,
+		VideoTrack: []domain.VideoClip{}, AudioCues: []domain.AudioCue{}, SubtitleCues: []domain.SubtitleCue{},
+		Output: manifest.Output, UpdatedAt: now,
+	}); err != nil {
 		return domain.Snapshot{}, err
 	}
 	if err := writeIfMissing(filepath.Join(absRoot, "AGENTS.md"), projectAgentInstructions()); err != nil {
@@ -74,6 +129,13 @@ func (s *Store) Create(root, name string) (domain.Snapshot, error) {
 		return domain.Snapshot{}, err
 	}
 	return s.Open(absRoot)
+}
+
+func localize(language, zh, en string) string {
+	if strings.HasPrefix(strings.ToLower(language), "zh") {
+		return zh
+	}
+	return en
 }
 
 func (s *Store) Open(root string) (domain.Snapshot, error) {
@@ -87,44 +149,120 @@ func (s *Store) Open(root string) (domain.Snapshot, error) {
 	}
 	var manifest domain.Project
 	if err := readJSON(projectPath, &manifest); err != nil {
-		return domain.Snapshot{}, fmt.Errorf("read project manifest: %w", err)
+		if errors.Is(err, os.ErrNotExist) {
+			legacy := filepath.Join(absRoot, "scene"+"ops.project.json")
+			if _, legacyErr := os.Lstat(legacy); legacyErr == nil {
+				return domain.Snapshot{}, errors.New("unsupported legacy project format; create a new DramaOps series")
+			}
+		}
+		return domain.Snapshot{}, fmt.Errorf("read DramaOps project manifest: %w", err)
 	}
 	if err := requireSchema(manifest.SchemaVersion); err != nil {
 		return domain.Snapshot{}, err
 	}
 	snapshot := domain.Snapshot{
-		Root:    absRoot,
-		Project: manifest,
-		Scenes:  []domain.Scene{},
-		Shots:   []domain.Shot{},
-		Assets:  []domain.Asset{},
-		Runs:    []domain.Run{},
+		Root: absRoot, Project: manifest,
+		Episodes: []domain.Episode{}, Characters: []domain.Character{}, Locations: []domain.Location{}, Props: []domain.Prop{},
+		Scenes: []domain.Scene{}, Shots: []domain.Shot{}, Edits: []domain.EpisodeEdit{}, Assets: []domain.Asset{}, Runs: []domain.Run{},
 	}
-	briefPath, err := ResolveRelative(absRoot, "brief.md")
-	if err != nil {
+	loads := []func() error{
+		func() error {
+			return loadJSONGlob(filepath.Join(absRoot, "episodes", "*", "episode.json"), &snapshot.Episodes)
+		},
+		func() error {
+			return loadJSONGlob(filepath.Join(absRoot, "episodes", "*", "edit.json"), &snapshot.Edits)
+		},
+		func() error {
+			return loadJSONGlob(filepath.Join(absRoot, "characters", "*.json"), &snapshot.Characters)
+		},
+		func() error { return loadJSONGlob(filepath.Join(absRoot, "locations", "*.json"), &snapshot.Locations) },
+		func() error { return loadJSONGlob(filepath.Join(absRoot, "props", "*.json"), &snapshot.Props) },
+		func() error { return loadJSONGlob(filepath.Join(absRoot, "scenes", "*.json"), &snapshot.Scenes) },
+		func() error { return loadJSONGlob(filepath.Join(absRoot, "shots", "*.json"), &snapshot.Shots) },
+		func() error {
+			return loadJSONGlob(filepath.Join(absRoot, "assets", "*", "asset.json"), &snapshot.Assets)
+		},
+		func() error { return loadJSONGlob(filepath.Join(absRoot, "runs", "*.json"), &snapshot.Runs) },
+	}
+	for _, load := range loads {
+		if err := load(); err != nil {
+			return domain.Snapshot{}, err
+		}
+	}
+	if err := validateSnapshotSchemas(snapshot); err != nil {
 		return domain.Snapshot{}, err
 	}
-	brief, err := os.ReadFile(briefPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return domain.Snapshot{}, fmt.Errorf("read creative brief: %w", err)
-	}
-	if len(brief) > MaxBriefBytes {
-		return domain.Snapshot{}, fmt.Errorf("creative brief exceeds %d bytes", MaxBriefBytes)
-	}
-	snapshot.Brief = string(brief)
-	if err := loadJSONGlob(filepath.Join(absRoot, "scenes", "*.json"), &snapshot.Scenes); err != nil {
+	if err := validateSnapshotSemantics(snapshot); err != nil {
 		return domain.Snapshot{}, err
 	}
-	if err := loadJSONGlob(filepath.Join(absRoot, "shots", "*.json"), &snapshot.Shots); err != nil {
-		return domain.Snapshot{}, err
+	sortSnapshot(&snapshot)
+	snapshot.ContinuityIssues = continuity.Check(snapshot)
+	return snapshot, nil
+}
+
+func validateSnapshotSchemas(snapshot domain.Snapshot) error {
+	check := func(kind, id string, version int) error {
+		if version != domain.SchemaVersion {
+			return fmt.Errorf("%s %s: unsupported schemaVersion %d", kind, id, version)
+		}
+		return nil
 	}
-	if err := loadJSONGlob(filepath.Join(absRoot, "assets", "*", "asset.json"), &snapshot.Assets); err != nil {
-		return domain.Snapshot{}, err
+	for _, value := range snapshot.Episodes {
+		if err := check("episode", value.ID, value.SchemaVersion); err != nil {
+			return err
+		}
 	}
-	if err := loadJSONGlob(filepath.Join(absRoot, "runs", "*.json"), &snapshot.Runs); err != nil {
-		return domain.Snapshot{}, err
+	for _, value := range snapshot.Characters {
+		if err := check("character", value.ID, value.SchemaVersion); err != nil {
+			return err
+		}
 	}
-	sort.Slice(snapshot.Scenes, func(i, j int) bool { return snapshot.Scenes[i].Order < snapshot.Scenes[j].Order })
+	for _, value := range snapshot.Locations {
+		if err := check("location", value.ID, value.SchemaVersion); err != nil {
+			return err
+		}
+	}
+	for _, value := range snapshot.Props {
+		if err := check("prop", value.ID, value.SchemaVersion); err != nil {
+			return err
+		}
+	}
+	for _, value := range snapshot.Scenes {
+		if err := check("scene", value.ID, value.SchemaVersion); err != nil {
+			return err
+		}
+	}
+	for _, value := range snapshot.Shots {
+		if err := check("shot", value.ID, value.SchemaVersion); err != nil {
+			return err
+		}
+	}
+	for _, value := range snapshot.Edits {
+		if err := check("edit", value.EpisodeID, value.SchemaVersion); err != nil {
+			return err
+		}
+	}
+	for _, value := range snapshot.Assets {
+		if err := check("asset", value.ID, value.SchemaVersion); err != nil {
+			return err
+		}
+	}
+	for _, value := range snapshot.Runs {
+		if err := check("run", value.ID, value.SchemaVersion); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sortSnapshot(snapshot *domain.Snapshot) {
+	sort.Slice(snapshot.Episodes, func(i, j int) bool { return snapshot.Episodes[i].Number < snapshot.Episodes[j].Number })
+	sort.Slice(snapshot.Scenes, func(i, j int) bool {
+		if snapshot.Scenes[i].EpisodeID == snapshot.Scenes[j].EpisodeID {
+			return snapshot.Scenes[i].Order < snapshot.Scenes[j].Order
+		}
+		return snapshot.Scenes[i].EpisodeID < snapshot.Scenes[j].EpisodeID
+	})
 	sort.Slice(snapshot.Shots, func(i, j int) bool {
 		if snapshot.Shots[i].SceneID == snapshot.Shots[j].SceneID {
 			return snapshot.Shots[i].Order < snapshot.Shots[j].Order
@@ -133,7 +271,6 @@ func (s *Store) Open(root string) (domain.Snapshot, error) {
 	})
 	sort.Slice(snapshot.Assets, func(i, j int) bool { return snapshot.Assets[i].CreatedAt.Before(snapshot.Assets[j].CreatedAt) })
 	sort.Slice(snapshot.Runs, func(i, j int) bool { return snapshot.Runs[i].CreatedAt.After(snapshot.Runs[j].CreatedAt) })
-	return snapshot, nil
 }
 
 func (s *Store) SaveProject(root string, value domain.Project) error {
@@ -141,6 +278,12 @@ func (s *Store) SaveProject(root string, value domain.Project) error {
 		value.SchemaVersion = domain.SchemaVersion
 	}
 	if err := requireSchema(value.SchemaVersion); err != nil {
+		return err
+	}
+	if value.Output.Width == 0 {
+		value.Output = domain.DefaultOutputSettings(domain.OrientationPortrait)
+	}
+	if err := validateProject(value); err != nil {
 		return err
 	}
 	value.UpdatedAt = s.now()
@@ -151,18 +294,7 @@ func (s *Store) SaveProject(root string, value domain.Project) error {
 	return AtomicWriteJSON(path, value)
 }
 
-func (s *Store) SaveBrief(root, markdown string) error {
-	if len(markdown) > MaxBriefBytes {
-		return fmt.Errorf("creative brief exceeds %d bytes", MaxBriefBytes)
-	}
-	path, err := ResolveRelative(root, "brief.md")
-	if err != nil {
-		return err
-	}
-	return AtomicWrite(path, []byte(markdown), 0o644)
-}
-
-func (s *Store) SaveScene(root string, value domain.Scene) error {
+func (s *Store) SaveEpisode(root string, value domain.Episode) error {
 	if err := ValidateID(value.ID); err != nil {
 		return err
 	}
@@ -172,8 +304,261 @@ func (s *Store) SaveScene(root string, value domain.Scene) error {
 	if err := requireSchema(value.SchemaVersion); err != nil {
 		return err
 	}
+	if strings.TrimSpace(value.Title) == "" {
+		return errors.New("episode title is required")
+	}
+	if value.Number < 1 {
+		return errors.New("episode number must be positive")
+	}
+	if value.Status == "" {
+		value.Status = domain.EpisodeDraft
+	}
+	seen := make(map[string]struct{}, len(value.ScriptBlocks))
+	for i := range value.ScriptBlocks {
+		block := &value.ScriptBlocks[i]
+		if block.ID == "" {
+			block.ID = stableScriptBlockID(value.ID, i)
+		}
+		if err := ValidateID(block.ID); err != nil {
+			return fmt.Errorf("script block: %w", err)
+		}
+		if _, exists := seen[block.ID]; exists {
+			return fmt.Errorf("duplicate script block id %q", block.ID)
+		}
+		seen[block.ID] = struct{}{}
+		if err := validateScriptBlock(*block); err != nil {
+			return err
+		}
+		block.Order = i
+	}
+	if err := validateEpisode(value); err != nil {
+		return err
+	}
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = s.now()
+	}
+	value.UpdatedAt = s.now()
+	path, err := ResolveRelative(root, filepath.Join("episodes", value.ID, "episode.json"))
+	if err != nil {
+		return err
+	}
+	return AtomicWriteJSON(path, value)
+}
+
+func stableScriptBlockID(episodeID string, index int) string {
+	return fmt.Sprintf("%s-block-%03d", episodeID, index+1)
+}
+
+func validateScriptBlock(block domain.ScriptBlock) error {
+	switch block.Kind {
+	case domain.ScriptAction, domain.ScriptDialogue, domain.ScriptVoiceOver, domain.ScriptSFX, domain.ScriptMusic:
+	default:
+		return fmt.Errorf("script block %s has unsupported kind %q", block.ID, block.Kind)
+	}
+	if strings.TrimSpace(block.Text) == "" {
+		return fmt.Errorf("script block %s text is required", block.ID)
+	}
+	if (block.Kind == domain.ScriptDialogue || block.Kind == domain.ScriptVoiceOver) && block.CharacterID == "" {
+		return fmt.Errorf("script block %s requires a character", block.ID)
+	}
+	return nil
+}
+
+func (s *Store) SaveEdit(root string, value domain.EpisodeEdit) error {
+	if err := ValidateID(value.EpisodeID); err != nil {
+		return err
+	}
+	if value.SchemaVersion == 0 {
+		value.SchemaVersion = domain.SchemaVersion
+	}
+	if err := requireSchema(value.SchemaVersion); err != nil {
+		return err
+	}
+	if value.Output.Width == 0 {
+		value.Output = domain.DefaultOutputSettings(domain.OrientationPortrait)
+	}
+	if err := validateEdit(value); err != nil {
+		return err
+	}
+	if err := validateOutput(value.Output); err != nil {
+		return err
+	}
+	value.UpdatedAt = s.now()
+	path, err := ResolveRelative(root, filepath.Join("episodes", value.EpisodeID, "edit.json"))
+	if err != nil {
+		return err
+	}
+	return AtomicWriteJSON(path, value)
+}
+
+func validateEdit(edit domain.EpisodeEdit) error {
+	seen := map[string]bool{}
+	for i, clip := range edit.VideoTrack {
+		if err := ValidateID(clip.ID); err != nil {
+			return fmt.Errorf("video clip: %w", err)
+		}
+		if err := ValidateID(clip.ShotID); err != nil {
+			return fmt.Errorf("video clip shot: %w", err)
+		}
+		if err := ValidateID(clip.AssetID); err != nil {
+			return fmt.Errorf("video clip asset: %w", err)
+		}
+		if clip.Order != i {
+			return fmt.Errorf("video track order must be contiguous at clip %s", clip.ID)
+		}
+		if seen[clip.ID] {
+			return fmt.Errorf("duplicate edit cue id %s", clip.ID)
+		}
+		seen[clip.ID] = true
+		if clip.InSeconds < 0 || clip.OutSeconds <= clip.InSeconds {
+			return fmt.Errorf("invalid trim range for clip %s", clip.ID)
+		}
+		if clip.Fit != domain.FitCover && clip.Fit != domain.FitContain {
+			return fmt.Errorf("invalid fit for clip %s", clip.ID)
+		}
+		switch clip.Transition {
+		case domain.TransitionCut, domain.TransitionDissolve, domain.TransitionFade:
+		default:
+			return fmt.Errorf("invalid transition for clip %s", clip.ID)
+		}
+		if clip.TransitionSeconds < 0 || clip.TransitionSeconds >= clip.OutSeconds-clip.InSeconds {
+			return fmt.Errorf("invalid transition duration for clip %s", clip.ID)
+		}
+	}
+	for _, cue := range edit.AudioCues {
+		if err := ValidateID(cue.ID); err != nil {
+			return fmt.Errorf("audio cue: %w", err)
+		}
+		if err := ValidateID(cue.AssetID); err != nil {
+			return fmt.Errorf("audio cue asset: %w", err)
+		}
+		if cue.ScriptBlockID != "" {
+			if err := ValidateID(cue.ScriptBlockID); err != nil {
+				return fmt.Errorf("audio cue script block: %w", err)
+			}
+		}
+		if seen[cue.ID] {
+			return fmt.Errorf("duplicate edit cue id %s", cue.ID)
+		}
+		seen[cue.ID] = true
+		if cue.StartSeconds < 0 || cue.DurationSeconds <= 0 {
+			return fmt.Errorf("invalid audio cue timing %s", cue.ID)
+		}
+		switch cue.Lane {
+		case domain.LaneDialogue, domain.LaneSFX, domain.LaneBGM:
+		default:
+			return fmt.Errorf("invalid audio lane for cue %s", cue.ID)
+		}
+	}
+	for _, cue := range edit.SubtitleCues {
+		if err := ValidateID(cue.ID); err != nil {
+			return fmt.Errorf("subtitle cue: %w", err)
+		}
+		if cue.ScriptBlockID != "" {
+			if err := ValidateID(cue.ScriptBlockID); err != nil {
+				return fmt.Errorf("subtitle script block: %w", err)
+			}
+		}
+		if seen[cue.ID] {
+			return fmt.Errorf("duplicate edit cue id %s", cue.ID)
+		}
+		seen[cue.ID] = true
+		if cue.StartSeconds < 0 || cue.DurationSeconds <= 0 || strings.TrimSpace(cue.Text) == "" {
+			return fmt.Errorf("invalid subtitle cue %s", cue.ID)
+		}
+	}
+	return nil
+}
+
+func (s *Store) SaveCharacter(root string, value domain.Character) error {
+	if err := prepareBibleEntity(&value.SchemaVersion, value.ID, &value.CreatedAt, &value.UpdatedAt, s.now); err != nil {
+		return err
+	}
+	if strings.TrimSpace(value.Name) == "" {
+		return errors.New("character name is required")
+	}
+	if value.VoiceProfile.ID == "" {
+		value.VoiceProfile.ID = "voice-" + value.ID
+	}
+	if value.VoiceProfile.Kind == "" {
+		value.VoiceProfile.Kind = domain.VoiceBuiltIn
+	}
+	if value.VoiceProfile.Kind == domain.VoiceBuiltIn && value.VoiceProfile.BuiltInVoice == "" {
+		value.VoiceProfile.BuiltInVoice = "alloy"
+	}
+	if err := validateCharacter(value); err != nil {
+		return err
+	}
+	path, err := ResolveRelative(root, filepath.Join("characters", value.ID+".json"))
+	if err != nil {
+		return err
+	}
+	return AtomicWriteJSON(path, value)
+}
+
+func (s *Store) SaveLocation(root string, value domain.Location) error {
+	if err := prepareBibleEntity(&value.SchemaVersion, value.ID, &value.CreatedAt, &value.UpdatedAt, s.now); err != nil {
+		return err
+	}
+	if strings.TrimSpace(value.Name) == "" {
+		return errors.New("location name is required")
+	}
+	path, err := ResolveRelative(root, filepath.Join("locations", value.ID+".json"))
+	if err != nil {
+		return err
+	}
+	return AtomicWriteJSON(path, value)
+}
+
+func (s *Store) SaveProp(root string, value domain.Prop) error {
+	if err := prepareBibleEntity(&value.SchemaVersion, value.ID, &value.CreatedAt, &value.UpdatedAt, s.now); err != nil {
+		return err
+	}
+	if strings.TrimSpace(value.Name) == "" {
+		return errors.New("prop name is required")
+	}
+	path, err := ResolveRelative(root, filepath.Join("props", value.ID+".json"))
+	if err != nil {
+		return err
+	}
+	return AtomicWriteJSON(path, value)
+}
+
+func prepareBibleEntity(version *int, id string, created, updated *time.Time, now func() time.Time) error {
+	if err := ValidateID(id); err != nil {
+		return err
+	}
+	if *version == 0 {
+		*version = domain.SchemaVersion
+	}
+	if err := requireSchema(*version); err != nil {
+		return err
+	}
+	if created.IsZero() {
+		*created = now()
+	}
+	*updated = now()
+	return nil
+}
+
+func (s *Store) SaveScene(root string, value domain.Scene) error {
+	if err := ValidateID(value.ID); err != nil {
+		return err
+	}
+	if err := ValidateID(value.EpisodeID); err != nil {
+		return fmt.Errorf("episode id: %w", err)
+	}
+	if value.SchemaVersion == 0 {
+		value.SchemaVersion = domain.SchemaVersion
+	}
+	if err := requireSchema(value.SchemaVersion); err != nil {
+		return err
+	}
+	if value.CreatedAt.IsZero() {
+		value.CreatedAt = s.now()
+	}
+	if err := validateScene(value); err != nil {
+		return err
 	}
 	value.UpdatedAt = s.now()
 	path, err := ResolveRelative(root, filepath.Join("scenes", value.ID+".json"))
@@ -187,6 +572,9 @@ func (s *Store) SaveShot(root string, value domain.Shot) error {
 	if err := ValidateID(value.ID); err != nil {
 		return err
 	}
+	if err := ValidateID(value.EpisodeID); err != nil {
+		return fmt.Errorf("episode id: %w", err)
+	}
 	if err := ValidateID(value.SceneID); err != nil {
 		return fmt.Errorf("scene id: %w", err)
 	}
@@ -194,6 +582,10 @@ func (s *Store) SaveShot(root string, value domain.Shot) error {
 		value.SchemaVersion = domain.SchemaVersion
 	}
 	if err := requireSchema(value.SchemaVersion); err != nil {
+		return err
+	}
+	applyShotDefaults(&value)
+	if err := validateShot(value); err != nil {
 		return err
 	}
 	if value.CreatedAt.IsZero() {
@@ -207,10 +599,28 @@ func (s *Store) SaveShot(root string, value domain.Shot) error {
 	return AtomicWriteJSON(path, value)
 }
 
-func (s *Store) SaveAsset(root string, value domain.Asset) error {
-	if err := ValidateID(value.ID); err != nil {
-		return err
+func applyShotDefaults(value *domain.Shot) {
+	if value.DurationSeconds <= 0 {
+		value.DurationSeconds = 4
 	}
+	if value.AspectRatio == "" {
+		value.AspectRatio = "9:16"
+	}
+	if value.ShotSize == "" {
+		value.ShotSize = domain.ShotMS
+	}
+	if value.CameraAngle == "" {
+		value.CameraAngle = domain.AngleEyeLevel
+	}
+	if value.CameraMovement == "" {
+		value.CameraMovement = domain.MovementStatic
+	}
+	if value.Transition == "" {
+		value.Transition = domain.TransitionCut
+	}
+}
+
+func (s *Store) SaveAsset(root string, value domain.Asset) error {
 	if value.SchemaVersion == 0 {
 		value.SchemaVersion = domain.SchemaVersion
 	}
@@ -220,8 +630,8 @@ func (s *Store) SaveAsset(root string, value domain.Asset) error {
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = s.now()
 	}
-	if _, err := ResolveRelative(root, value.RelativePath); err != nil {
-		return fmt.Errorf("asset path: %w", err)
+	if err := validateAsset(root, value); err != nil {
+		return err
 	}
 	path, err := ResolveRelative(root, filepath.Join("assets", value.ID, "asset.json"))
 	if err != nil {
@@ -230,76 +640,7 @@ func (s *Store) SaveAsset(root string, value domain.Asset) error {
 	return AtomicWriteJSON(path, value)
 }
 
-func (s *Store) SelectImageVersion(root, shotID, assetID string) (domain.Shot, error) {
-	if err := ValidateID(shotID); err != nil {
-		return domain.Shot{}, err
-	}
-	if err := ValidateID(assetID); err != nil {
-		return domain.Shot{}, err
-	}
-	snapshot, err := s.Open(root)
-	if err != nil {
-		return domain.Shot{}, err
-	}
-	validAsset := false
-	for _, asset := range snapshot.Assets {
-		if asset.ID == assetID && asset.ShotID == shotID && asset.Kind == domain.AssetKindImage {
-			validAsset = true
-			break
-		}
-	}
-	if !validAsset {
-		return domain.Shot{}, fmt.Errorf("asset %s is not an image version of shot %s", assetID, shotID)
-	}
-	for _, shot := range snapshot.Shots {
-		if shot.ID == shotID {
-			shot.SelectedAssetID = assetID
-			if err := s.SaveShot(root, shot); err != nil {
-				return domain.Shot{}, err
-			}
-			return shot, nil
-		}
-	}
-	return domain.Shot{}, fmt.Errorf("shot %s not found", shotID)
-}
-
-func (s *Store) AddReferenceAsset(root, shotID, assetID string) (domain.Shot, error) {
-	snapshot, err := s.Open(root)
-	if err != nil {
-		return domain.Shot{}, err
-	}
-	validAsset := false
-	for _, asset := range snapshot.Assets {
-		if asset.ID == assetID && asset.ShotID == shotID && asset.Kind == domain.AssetKindReference {
-			validAsset = true
-			break
-		}
-	}
-	if !validAsset {
-		return domain.Shot{}, fmt.Errorf("asset %s is not a reference for shot %s", assetID, shotID)
-	}
-	for _, shot := range snapshot.Shots {
-		if shot.ID != shotID {
-			continue
-		}
-		for _, existing := range shot.ReferenceAssets {
-			if existing == assetID {
-				return shot, nil
-			}
-		}
-		shot.ReferenceAssets = append(shot.ReferenceAssets, assetID)
-		if err := s.SaveShot(root, shot); err != nil {
-			return domain.Shot{}, err
-		}
-		return shot, nil
-	}
-	return domain.Shot{}, fmt.Errorf("shot %s not found", shotID)
-}
-
 func (s *Store) SaveRun(root string, value domain.Run) error {
-	if err := ValidateID(value.ID); err != nil {
-		return err
-	}
 	if value.SchemaVersion == 0 {
 		value.SchemaVersion = domain.SchemaVersion
 	}
@@ -308,6 +649,9 @@ func (s *Store) SaveRun(root string, value domain.Run) error {
 	}
 	if value.CreatedAt.IsZero() {
 		value.CreatedAt = s.now()
+	}
+	if err := validateRun(value); err != nil {
+		return err
 	}
 	value.UpdatedAt = s.now()
 	path, err := ResolveRelative(root, filepath.Join("runs", value.ID+".json"))
@@ -332,80 +676,142 @@ func (s *Store) TransitionRun(root, runID string, next domain.RunStatus, message
 	if !domain.CanTransitionRun(run.Status, next) {
 		return domain.Run{}, fmt.Errorf("invalid run transition %s -> %s", run.Status, next)
 	}
-	run.Status = next
-	run.Error = message
+	run.Status, run.Error = next, message
 	if err := s.SaveRun(root, run); err != nil {
 		return domain.Run{}, err
 	}
 	return run, nil
 }
 
-func (s *Store) ApplyStoryboard(root string, scenes []domain.Scene, shots []domain.Shot) (domain.Snapshot, error) {
+func (s *Store) ApplyScript(root string, plan ScriptPlan) (domain.Snapshot, error) {
 	existing, err := s.Open(root)
 	if err != nil {
 		return domain.Snapshot{}, err
 	}
-	if len(existing.Scenes) > 0 || len(existing.Shots) > 0 {
-		return domain.Snapshot{}, errors.New("storyboard already exists; edit existing scenes and shots instead")
+	var current *domain.Episode
+	for i := range existing.Episodes {
+		if existing.Episodes[i].ID == plan.Episode.ID {
+			current = &existing.Episodes[i]
+			break
+		}
 	}
-	if len(scenes) == 0 || len(shots) == 0 {
-		return domain.Snapshot{}, errors.New("storyboard requires at least one scene and one shot")
+	if current == nil {
+		return domain.Snapshot{}, fmt.Errorf("episode %s not found", plan.Episode.ID)
 	}
-	now := s.now()
-	sceneIDs := make(map[string]struct{}, len(scenes))
-	for i := range scenes {
-		if scenes[i].ID == "" {
-			scenes[i].ID = uuid.NewString()
-		}
-		scenes[i].SchemaVersion = domain.SchemaVersion
-		scenes[i].Order = i
-		scenes[i].ShotIDs = nil
-		if scenes[i].CreatedAt.IsZero() {
-			scenes[i].CreatedAt = now
-		}
-		if err := ValidateID(scenes[i].ID); err != nil {
-			return domain.Snapshot{}, fmt.Errorf("scene id: %w", err)
-		}
-		if _, duplicate := sceneIDs[scenes[i].ID]; duplicate {
-			return domain.Snapshot{}, fmt.Errorf("duplicate scene id %q", scenes[i].ID)
-		}
-		sceneIDs[scenes[i].ID] = struct{}{}
+	if len(current.ScriptBlocks) > 0 || len(current.SceneIDs) > 0 {
+		return domain.Snapshot{}, errors.New("episode script already exists; edit it directly instead")
 	}
-	shotIDs := make(map[string]struct{}, len(shots))
-	shotOrder := make(map[string]int, len(scenes))
+	if len(plan.Scenes) == 0 || len(plan.Episode.ScriptBlocks) == 0 {
+		return domain.Snapshot{}, errors.New("script requires at least one scene and one block")
+	}
+	plan.Episode.SchemaVersion = domain.SchemaVersion
+	plan.Episode.Number, plan.Episode.CreatedAt = current.Number, current.CreatedAt
+	if plan.Episode.Status == "" {
+		plan.Episode.Status = domain.EpisodePlanning
+	}
+	plan.Episode.SceneIDs = make([]string, 0, len(plan.Scenes))
+	sceneIDs := make(map[string]struct{}, len(plan.Scenes))
+	for i := range plan.Scenes {
+		scene := &plan.Scenes[i]
+		if scene.ID == "" {
+			scene.ID = fmt.Sprintf("%s-scene-%02d", plan.Episode.ID, i+1)
+		}
+		if err := ValidateID(scene.ID); err != nil {
+			return domain.Snapshot{}, err
+		}
+		if _, duplicate := sceneIDs[scene.ID]; duplicate {
+			return domain.Snapshot{}, fmt.Errorf("duplicate scene id %q", scene.ID)
+		}
+		sceneIDs[scene.ID] = struct{}{}
+		scene.SchemaVersion, scene.EpisodeID, scene.Order = domain.SchemaVersion, plan.Episode.ID, i
+		scene.ShotIDs = []string{}
+		plan.Episode.SceneIDs = append(plan.Episode.SceneIDs, scene.ID)
+	}
+	for _, block := range plan.Episode.ScriptBlocks {
+		if _, ok := sceneIDs[block.SceneID]; !ok {
+			return domain.Snapshot{}, fmt.Errorf("script block %s references unknown scene %s", block.ID, block.SceneID)
+		}
+	}
+	for i := range plan.Characters {
+		if err := s.SaveCharacter(root, plan.Characters[i]); err != nil {
+			return domain.Snapshot{}, err
+		}
+	}
+	for i := range plan.Locations {
+		if err := s.SaveLocation(root, plan.Locations[i]); err != nil {
+			return domain.Snapshot{}, err
+		}
+	}
+	for i := range plan.Props {
+		if err := s.SaveProp(root, plan.Props[i]); err != nil {
+			return domain.Snapshot{}, err
+		}
+	}
+	for i := range plan.Scenes {
+		if err := s.SaveScene(root, plan.Scenes[i]); err != nil {
+			return domain.Snapshot{}, err
+		}
+	}
+	if err := s.SaveEpisode(root, plan.Episode); err != nil {
+		return domain.Snapshot{}, err
+	}
+	if err := RebuildIndex(root); err != nil {
+		return domain.Snapshot{}, err
+	}
+	return s.Open(root)
+}
+
+func (s *Store) ApplyShotPlan(root, episodeID string, shots []domain.Shot) (domain.Snapshot, error) {
+	existing, err := s.Open(root)
+	if err != nil {
+		return domain.Snapshot{}, err
+	}
+	for _, shot := range existing.Shots {
+		if shot.EpisodeID == episodeID {
+			return domain.Snapshot{}, errors.New("episode shot plan already exists; edit shots directly instead")
+		}
+	}
+	if len(shots) == 0 {
+		return domain.Snapshot{}, errors.New("shot plan requires at least one shot")
+	}
+	scenes := make(map[string]domain.Scene)
+	for _, scene := range existing.Scenes {
+		if scene.EpisodeID == episodeID {
+			scenes[scene.ID] = scene
+		}
+	}
+	if len(scenes) == 0 {
+		return domain.Snapshot{}, fmt.Errorf("episode %s has no script scenes", episodeID)
+	}
+	order := make(map[string]int)
+	ids := make(map[string]struct{})
 	for i := range shots {
-		if shots[i].ID == "" {
-			shots[i].ID = uuid.NewString()
+		shot := &shots[i]
+		if shot.ID == "" {
+			shot.ID = fmt.Sprintf("%s-shot-%03d", episodeID, i+1)
 		}
-		if _, ok := sceneIDs[shots[i].SceneID]; !ok {
-			return domain.Snapshot{}, fmt.Errorf("shot %q references unknown scene %q", shots[i].ID, shots[i].SceneID)
+		if err := ValidateID(shot.ID); err != nil {
+			return domain.Snapshot{}, err
 		}
-		if err := ValidateID(shots[i].ID); err != nil {
-			return domain.Snapshot{}, fmt.Errorf("shot id: %w", err)
+		if _, duplicate := ids[shot.ID]; duplicate {
+			return domain.Snapshot{}, fmt.Errorf("duplicate shot id %q", shot.ID)
 		}
-		if _, duplicate := shotIDs[shots[i].ID]; duplicate {
-			return domain.Snapshot{}, fmt.Errorf("duplicate shot id %q", shots[i].ID)
+		ids[shot.ID] = struct{}{}
+		scene, ok := scenes[shot.SceneID]
+		if !ok {
+			return domain.Snapshot{}, fmt.Errorf("shot %s references unknown scene %s", shot.ID, shot.SceneID)
 		}
-		shotIDs[shots[i].ID] = struct{}{}
-		shots[i].SchemaVersion = domain.SchemaVersion
-		shots[i].Order = shotOrder[shots[i].SceneID]
-		shotOrder[shots[i].SceneID]++
-		if shots[i].DurationSeconds == 0 {
-			shots[i].DurationSeconds = 4
-		}
-		if shots[i].AspectRatio == "" {
-			shots[i].AspectRatio = "16:9"
-		}
-		if shots[i].CreatedAt.IsZero() {
-			shots[i].CreatedAt = now
-		}
-		for j := range scenes {
-			if scenes[j].ID == shots[i].SceneID {
-				scenes[j].ShotIDs = append(scenes[j].ShotIDs, shots[i].ID)
-				break
-			}
+		shot.SchemaVersion, shot.EpisodeID, shot.Order = domain.SchemaVersion, episodeID, order[shot.SceneID]
+		order[shot.SceneID]++
+		applyShotDefaults(shot)
+		scene.ShotIDs = append(scene.ShotIDs, shot.ID)
+		scenes[scene.ID] = scene
+		if err := validateShot(*shot); err != nil {
+			return domain.Snapshot{}, err
 		}
 	}
+	// Validate the complete plan before the first durable write so a malformed
+	// later shot cannot leave a partially applied shot list behind.
 	for _, shot := range shots {
 		if err := s.SaveShot(root, shot); err != nil {
 			return domain.Snapshot{}, err
@@ -422,57 +828,147 @@ func (s *Store) ApplyStoryboard(root string, scenes []domain.Scene, shots []doma
 	return s.Open(root)
 }
 
-func (s *Store) ImportAsset(root, source, shotID string, kind domain.AssetKind) (domain.Asset, error) {
-	return s.ImportAssetWithParent(root, source, shotID, kind, "")
+func (s *Store) SelectKeyframeVersion(root, shotID, assetID string) (domain.Shot, error) {
+	return s.selectShotAsset(root, shotID, assetID, domain.AssetKindImage)
 }
 
-func (s *Store) ImportAssetWithParent(root, source, shotID string, kind domain.AssetKind, parentAssetID string) (domain.Asset, error) {
-	if kind != domain.AssetKindImage && kind != domain.AssetKindVideo && kind != domain.AssetKindReference {
-		return domain.Asset{}, fmt.Errorf("unsupported asset kind %q", kind)
+func (s *Store) SelectVideoVersion(root, shotID, assetID string) (domain.Shot, error) {
+	return s.selectShotAsset(root, shotID, assetID, domain.AssetKindVideo)
+}
+
+func (s *Store) selectShotAsset(root, shotID, assetID string, kind domain.AssetKind) (domain.Shot, error) {
+	if err := ValidateID(shotID); err != nil {
+		return domain.Shot{}, err
 	}
-	var snapshot domain.Snapshot
-	if shotID != "" {
-		if err := ValidateID(shotID); err != nil {
-			return domain.Asset{}, err
+	if err := ValidateID(assetID); err != nil {
+		return domain.Shot{}, err
+	}
+	snapshot, err := s.Open(root)
+	if err != nil {
+		return domain.Shot{}, err
+	}
+	valid := false
+	for _, asset := range snapshot.Assets {
+		if asset.ID == assetID && asset.ShotID == shotID && asset.Kind == kind {
+			valid = true
+			break
 		}
-		var err error
-		snapshot, err = s.Open(root)
-		if err != nil {
-			return domain.Asset{}, err
+	}
+	if !valid {
+		return domain.Shot{}, fmt.Errorf("asset %s is not a %s version of shot %s", assetID, kind, shotID)
+	}
+	for _, shot := range snapshot.Shots {
+		if shot.ID != shotID {
+			continue
 		}
-		shotFound := false
-		for _, shot := range snapshot.Shots {
-			if shot.ID == shotID {
-				shotFound = true
-				break
+		if kind == domain.AssetKindImage {
+			shot.SelectedKeyframeAssetID = assetID
+		} else {
+			shot.SelectedVideoAssetID = assetID
+		}
+		if err := s.SaveShot(root, shot); err != nil {
+			return domain.Shot{}, err
+		}
+		return shot, nil
+	}
+	return domain.Shot{}, fmt.Errorf("shot %s not found", shotID)
+}
+
+func (s *Store) SelectVoiceAsset(root, episodeID, blockID, assetID string) (domain.Episode, error) {
+	snapshot, err := s.Open(root)
+	if err != nil {
+		return domain.Episode{}, err
+	}
+	valid := false
+	for _, asset := range snapshot.Assets {
+		if asset.ID == assetID && asset.EpisodeID == episodeID && asset.ScriptBlockID == blockID && asset.Kind == domain.AssetKindAudio {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return domain.Episode{}, fmt.Errorf("asset %s is not voice audio for block %s", assetID, blockID)
+	}
+	for _, episode := range snapshot.Episodes {
+		if episode.ID != episodeID {
+			continue
+		}
+		for i := range episode.ScriptBlocks {
+			if episode.ScriptBlocks[i].ID == blockID {
+				episode.ScriptBlocks[i].SelectedVoiceAssetID = assetID
+				if err := s.SaveEpisode(root, episode); err != nil {
+					return domain.Episode{}, err
+				}
+				return episode, nil
 			}
 		}
-		if !shotFound {
-			return domain.Asset{}, fmt.Errorf("shot %s not found", shotID)
+		return domain.Episode{}, fmt.Errorf("script block %s not found", blockID)
+	}
+	return domain.Episode{}, fmt.Errorf("episode %s not found", episodeID)
+}
+
+func (s *Store) AddReferenceAsset(root, shotID, assetID string) (domain.Shot, error) {
+	snapshot, err := s.Open(root)
+	if err != nil {
+		return domain.Shot{}, err
+	}
+	valid := false
+	for _, asset := range snapshot.Assets {
+		if asset.ID == assetID && asset.ShotID == shotID && asset.Kind == domain.AssetKindReference {
+			valid = true
+			break
 		}
 	}
-	if parentAssetID != "" {
-		if err := ValidateID(parentAssetID); err != nil {
-			return domain.Asset{}, fmt.Errorf("parent asset id: %w", err)
+	if !valid {
+		return domain.Shot{}, fmt.Errorf("asset %s is not a reference for shot %s", assetID, shotID)
+	}
+	for _, shot := range snapshot.Shots {
+		if shot.ID != shotID {
+			continue
 		}
-		parentFound := false
-		for _, asset := range snapshot.Assets {
-			if asset.ID == parentAssetID && asset.ShotID == shotID && (asset.Kind == domain.AssetKindImage || asset.Kind == domain.AssetKindReference) {
-				parentFound = true
-				break
+		for _, existing := range shot.ReferenceAssets {
+			if existing == assetID {
+				return shot, nil
 			}
 		}
-		if !parentFound {
-			return domain.Asset{}, fmt.Errorf("parent asset %s is not a visual asset of shot %s", parentAssetID, shotID)
+		shot.ReferenceAssets = append(shot.ReferenceAssets, assetID)
+		if err := s.SaveShot(root, shot); err != nil {
+			return domain.Shot{}, err
+		}
+		return shot, nil
+	}
+	return domain.Shot{}, fmt.Errorf("shot %s not found", shotID)
+}
+
+func (s *Store) ImportAsset(root string, options ImportOptions) (domain.Asset, error) {
+	if !supportedAssetKind(options.Kind) {
+		return domain.Asset{}, fmt.Errorf("unsupported asset kind %q", options.Kind)
+	}
+	snapshot, err := s.Open(root)
+	if err != nil {
+		return domain.Asset{}, err
+	}
+	if options.EpisodeID != "" && !episodeExists(snapshot, options.EpisodeID) {
+		return domain.Asset{}, fmt.Errorf("episode %s not found", options.EpisodeID)
+	}
+	if options.ShotID != "" && !shotExists(snapshot, options.ShotID) {
+		return domain.Asset{}, fmt.Errorf("shot %s not found", options.ShotID)
+	}
+	if options.ScriptBlockID != "" && !scriptBlockExists(snapshot, options.ScriptBlockID) {
+		return domain.Asset{}, fmt.Errorf("script block %s not found", options.ScriptBlockID)
+	}
+	for _, input := range options.Inputs {
+		if !assetExists(snapshot, input.AssetID) {
+			return domain.Asset{}, fmt.Errorf("input asset %s not found", input.AssetID)
 		}
 	}
-	input, err := os.Open(source)
+	input, err := os.Open(options.Source)
 	if err != nil {
 		return domain.Asset{}, fmt.Errorf("open imported asset: %w", err)
 	}
 	defer input.Close()
 	assetID := uuid.NewString()
-	ext := strings.ToLower(filepath.Ext(source))
+	ext := strings.ToLower(filepath.Ext(options.Source))
 	if ext == "" || len(ext) > 12 {
 		ext = ".bin"
 	}
@@ -484,7 +980,7 @@ func (s *Store) ImportAssetWithParent(root, source, shotID string, kind domain.A
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return domain.Asset{}, err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(destination), ".sceneops-import-*")
+	tmp, err := os.CreateTemp(filepath.Dir(destination), ".dramaops-import-*")
 	if err != nil {
 		return domain.Asset{}, err
 	}
@@ -509,24 +1005,26 @@ func (s *Store) ImportAssetWithParent(root, source, shotID string, kind domain.A
 		return domain.Asset{}, err
 	}
 	asset := domain.Asset{
-		SchemaVersion: domain.SchemaVersion,
-		ID:            assetID,
-		ShotID:        shotID,
-		Kind:          kind,
-		RelativePath:  filepath.ToSlash(rel),
-		SHA256:        hex.EncodeToString(hash.Sum(nil)),
-		ParentAssetID: parentAssetID,
-		Provenance: domain.Provenance{
-			Provider:    "external-import",
-			GeneratedAt: s.now(),
-		},
-		CreatedAt: s.now(),
+		SchemaVersion: domain.SchemaVersion, ID: assetID, EpisodeID: options.EpisodeID, ShotID: options.ShotID,
+		ScriptBlockID: options.ScriptBlockID, Kind: options.Kind, RelativePath: filepath.ToSlash(rel),
+		SHA256: hex.EncodeToString(hash.Sum(nil)), Inputs: options.Inputs,
+		Provenance: domain.Provenance{Provider: "external-import", GeneratedAt: s.now()}, CreatedAt: s.now(),
 	}
 	if err := s.SaveAsset(root, asset); err != nil {
 		return domain.Asset{}, err
 	}
-	if kind == domain.AssetKindReference && shotID != "" {
-		if _, err := s.AddReferenceAsset(root, shotID, asset.ID); err != nil {
+	if options.Kind == domain.AssetKindReference && options.ShotID != "" {
+		if _, err := s.AddReferenceAsset(root, options.ShotID, asset.ID); err != nil {
+			return domain.Asset{}, err
+		}
+	}
+	if options.Kind == domain.AssetKindVideo && options.ShotID != "" {
+		if _, err := s.SelectVideoVersion(root, options.ShotID, asset.ID); err != nil {
+			return domain.Asset{}, err
+		}
+	}
+	if options.Kind == domain.AssetKindAudio && options.ScriptBlockID != "" {
+		if _, err := s.SelectVoiceAsset(root, options.EpisodeID, options.ScriptBlockID, asset.ID); err != nil {
 			return domain.Asset{}, err
 		}
 	}
@@ -534,6 +1032,50 @@ func (s *Store) ImportAssetWithParent(root, source, shotID string, kind domain.A
 		return domain.Asset{}, err
 	}
 	return asset, nil
+}
+
+func supportedAssetKind(kind domain.AssetKind) bool {
+	switch kind {
+	case domain.AssetKindImage, domain.AssetKindVideo, domain.AssetKindReference, domain.AssetKindAudio, domain.AssetKindSubtitle, domain.AssetKindRender:
+		return true
+	default:
+		return false
+	}
+}
+
+func episodeExists(snapshot domain.Snapshot, id string) bool {
+	for _, value := range snapshot.Episodes {
+		if value.ID == id {
+			return true
+		}
+	}
+	return false
+}
+func shotExists(snapshot domain.Snapshot, id string) bool {
+	for _, value := range snapshot.Shots {
+		if value.ID == id {
+			return true
+		}
+	}
+	return false
+}
+func scriptBlockExists(snapshot domain.Snapshot, id string) bool {
+	for _, episode := range snapshot.Episodes {
+		for _, block := range episode.ScriptBlocks {
+			if block.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+func assetExists(snapshot domain.Snapshot, id string) bool {
+	for _, value := range snapshot.Assets {
+		if value.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func HashFile(path string) (string, error) {
@@ -561,7 +1103,9 @@ func readJSON(path string, output any) error {
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(data, output); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(output); err != nil {
 		return fmt.Errorf("decode %s: %w", path, err)
 	}
 	return nil
@@ -592,10 +1136,10 @@ func writeIfMissing(path, content string) error {
 }
 
 func projectAgentInstructions() string {
-	return "# SceneOps Project Instructions\n\n" +
-		"- Treat `sceneops.project.json`, `scenes/`, `shots/`, `assets/`, and `runs/` as structured project data.\n" +
-		"- Read the project through `sceneops_project_read`.\n" +
-		"- Use `sceneops_storyboard_apply` for structured storyboard changes.\n" +
-		"- Ask for explicit approval before storyboard writes, image generation, video generation, or cancellation.\n" +
+	return "# DramaOps Project Instructions\n\n" +
+		"- Treat `dramaops.project.json`, episode manifests, bibles, shots, assets, edits, and runs as durable project data.\n" +
+		"- Read the series through `dramaops_project_read`.\n" +
+		"- Use `dramaops_script_apply` and `dramaops_shotplan_apply` for initial structured writes.\n" +
+		"- Ask for explicit approval before agent writes, paid generation, or cancellation.\n" +
 		"- Never expose credentials or write outside this project root.\n"
 }

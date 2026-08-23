@@ -12,7 +12,7 @@ func AtomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return fmt.Errorf("create parent directory: %w", err)
 	}
-	tmp, err := os.CreateTemp(parent, ".sceneops-write-*")
+	tmp, err := os.CreateTemp(parent, ".dramaops-write-*")
 	if err != nil {
 		return fmt.Errorf("create temporary file: %w", err)
 	}

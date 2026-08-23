@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "character-lin",
+  "name": "Lin",
+  "description": "A precise radio engineer in her early thirties who hides grief behind practical focus.",
+  "appearance": "East Asian woman, early thirties, straight chin-length black hair, small scar through the left eyebrow",
+  "wardrobe": "Dark green waterproof coat, charcoal knit, black field bag, no jewelry",
+  "negativePrompt": "different haircut, red coat, earrings, glamorous makeup",
+  "voiceProfile": {"id":"voice-lin","kind":"built_in","name":"Lin — restrained","builtInVoice":"coral"},
+  "createdAt": "2026-08-23T00:00:00Z",
+  "updatedAt": "2026-08-23T00:00:00Z"
+}

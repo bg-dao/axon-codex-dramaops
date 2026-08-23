@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "character-chen",
+  "name": "Chen",
+  "description": "The final-train conductor, observant and economical with words.",
+  "appearance": "East Asian man in his late fifties, weathered face, silver at the temples, square glasses",
+  "wardrobe": "Navy railway uniform, matching cap, brass watch chain",
+  "negativePrompt": "young face, beard, casual clothes, changing cap",
+  "voiceProfile": {"id":"voice-chen","kind":"built_in","name":"Chen — low and calm","builtInVoice":"onyx"},
+  "createdAt": "2026-08-23T00:00:00Z",
+  "updatedAt": "2026-08-23T00:00:00Z"
+}

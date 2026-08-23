@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	codexruntime "github.com/bg-dao/axon-codex-sceneops/internal/runtime"
+	codexruntime "github.com/bg-dao/axon-codex-dramaops/internal/runtime"
 )
 
 type RuntimeAPI struct{ backend *Backend }

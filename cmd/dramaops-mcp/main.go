@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/mcp"
+	"github.com/bg-dao/axon-codex-dramaops/internal/mcp"
 )
 
 func main() {
-	root := flag.String("project", "", "absolute SceneOps project root")
+	root := flag.String("project", "", "absolute DramaOps project root")
 	flag.Parse()
 	if *root == "" {
 		fmt.Fprintln(os.Stderr, "--project is required")

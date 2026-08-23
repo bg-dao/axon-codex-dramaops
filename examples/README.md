@@ -1,7 +1,5 @@
-# Reproducible example projects
+# Example series
 
-- `nocturne-train`: cinematic narrative baseline with three scenes and six shots.
-- `ceramic-speaker`: restrained product reveal for keyframe version comparison.
-- `tidal-memory`: abstract music visual for external reference and video import workflows.
+`nocturne-train/` is a deterministic portrait short-drama example with one episode, two characters and locked built-in Voice Profiles, three locations, one continuity prop, three scenes, eight professional shots, a Style Bible, a Sound Palette, and an empty fixed timeline ready for imported or generated media.
 
-The examples intentionally contain manifests and briefs but no generated media. Copy an example to a writable folder before running paid generation so the repository remains deterministic.
+The example intentionally contains no generated media, provider identifiers, credentials, consent recordings, or device-local state. Copy it to a writable directory before opening it in DramaOps. The continuity panel will initially report missing references, keyframes, videos, and dialogue audio; resolving those warnings is the reproducible demo workflow.

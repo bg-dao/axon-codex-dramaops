@@ -1,4 +1,4 @@
-name: macOS pre-release
+name: DramaOps v0.2 macOS pre-release
 
 on:
   workflow_dispatch:
@@ -26,9 +26,11 @@ jobs:
         working-directory: frontend
       - run: npm test
         working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
       - run: go test -race ./...
       - run: go run github.com/wailsapp/wails/v2/cmd/wails@v2.15.0 build -nopackage -m -platform darwin/arm64
       - uses: actions/upload-artifact@v4
         with:
-          name: SceneOps-macos-arm64-unsigned-prerelease
-          path: build/bin/SceneOps
+          name: DramaOps-macos-arm64-unsigned-prerelease
+          path: build/bin/DramaOps

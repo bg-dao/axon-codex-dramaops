@@ -1,63 +1,200 @@
-import { describe, expect, it } from 'vitest';
-import { activeVideoRunIDs, briefHasContent, initialAgentState, partitionShotAssets, reduceAgentEvent, sortedStoryboard, workflowSummary } from './state';
+import { describe, expect, it } from "vitest";
+import {
+  activeProviderRunIDs,
+  fixedTimelineValid,
+  initialAgentState,
+  partitionAssets,
+  reduceAgentEvent,
+  resolveLocale,
+  sortedByOrder,
+  sortedEpisodes,
+  workflowSummary,
+} from "./state";
 
-describe('agent event reducer', () => {
-  it('assembles streamed agent text and clears the active turn', () => {
-    let state = reduceAgentEvent(initialAgentState, { method: 'turn/started', params: { turn: { id: 'turn_1' } } });
-    state = reduceAgentEvent(state, { method: 'item/agentMessage/delta', params: { delta: 'Frame ' } });
-    state = reduceAgentEvent(state, { method: 'item/agentMessage/delta', params: { delta: 'one' } });
-    expect(state.streamingText).toBe('Frame one');
-    state = reduceAgentEvent(state, { method: 'turn/completed' });
-    expect(state.activeTurnId).toBeUndefined();
+describe("agent events", () => {
+  it("assembles streamed output and clears the active turn", () => {
+    let state = reduceAgentEvent(initialAgentState, {
+      method: "turn/started",
+      params: { turn: { id: "turn-1" } },
+    });
+    state = reduceAgentEvent(state, {
+      method: "item/agentMessage/delta",
+      params: { delta: "Episode " },
+    });
+    state = reduceAgentEvent(state, {
+      method: "item/agentMessage/delta",
+      params: { delta: "one" },
+    });
+    expect(state.streamingText).toBe("Episode one");
+    expect(
+      reduceAgentEvent(state, { method: "turn/completed" }).activeTurnId,
+    ).toBeUndefined();
   });
 
-  it('retains only the latest 250 events', () => {
+  it("retains only the latest 250 events", () => {
     let state = initialAgentState;
-    for (let index = 0; index < 260; index += 1) {
+    for (let index = 0; index < 260; index += 1)
       state = reduceAgentEvent(state, { method: `event/${index}` });
-    }
     expect(state.events).toHaveLength(250);
-    expect(state.events[0].method).toBe('event/10');
+    expect(state.events[0].method).toBe("event/10");
   });
 });
 
-describe('storyboard sorting', () => {
-  it('does not mutate the manifest order', () => {
-    const source = [{ order: 2 }, { order: 0 }, { order: 1 }];
-    expect(sortedStoryboard(source).map((item) => item.order)).toEqual([0, 1, 2]);
-    expect(source[0].order).toBe(2);
-  });
-});
-
-describe('core workflow state', () => {
-  it('treats the empty brief template as incomplete', () => {
-    expect(briefHasContent('# Creative brief\n\n')).toBe(false);
-    expect(briefHasContent('# Creative brief\n\nA quiet launch film.')).toBe(true);
+describe("locale and ordering", () => {
+  it("persists an explicit language and otherwise follows the system", () => {
+    expect(resolveLocale("en", "zh-CN")).toBe("en");
+    expect(resolveLocale(null, "zh-Hans")).toBe("zh-CN");
+    expect(resolveLocale(null, "fr-FR")).toBe("en");
   });
 
-  it('derives the next action without persisted workflow state', () => {
-    expect(workflowSummary({ brief: '# Creative brief\n\nFilm', scenes: [], shots: [], assets: [] }).next).toBe('storyboard');
-    expect(workflowSummary({
-      brief: '# Creative brief\n\nFilm',
-      scenes: [{}],
-      shots: [{ selectedAssetId: 'image-1' }],
-      assets: [{ id: 'image-1', kind: 'image' }, { id: 'video-1', kind: 'video' }],
-    }).next).toBe('export');
-  });
-
-  it('separates references, versions, and videos and polls only active video jobs', () => {
-    const groups = partitionShotAssets([
-      { id: 'image-1', kind: 'image' },
-      { id: 'reference-1', kind: 'reference' },
-      { id: 'video-1', kind: 'video' },
+  it("sorts episodes and shots without mutating manifests", () => {
+    const episodes = [{ number: 3 }, { number: 1 }, { number: 2 }];
+    const shots = [{ order: 2 }, { order: 0 }, { order: 1 }];
+    expect(sortedEpisodes(episodes).map((item) => item.number)).toEqual([
+      1, 2, 3,
     ]);
-    expect(groups.images).toHaveLength(1);
-    expect(groups.references).toHaveLength(1);
-    expect(groups.videos).toHaveLength(1);
-    expect(activeVideoRunIDs([
-      { id: 'run-1', operation: 'video_generate', status: 'running', providerJobId: 'job-1' },
-      { id: 'run-2', operation: 'image_generate', status: 'running', providerJobId: 'job-2' },
-      { id: 'run-3', operation: 'video_generate', status: 'succeeded', providerJobId: 'job-3' },
-    ])).toEqual(['run-1']);
+    expect(sortedByOrder(shots).map((item) => item.order)).toEqual([0, 1, 2]);
+    expect(episodes[0].number).toBe(3);
+  });
+});
+
+describe("derived short-drama workflow", () => {
+  const base = {
+    episodes: [
+      {
+        id: "episode-001",
+        scriptBlocks: [] as {
+          id: string;
+          kind?: string;
+          selectedVoiceAssetId?: string;
+        }[],
+      },
+    ],
+    shots: [] as {
+      episodeId: string;
+      selectedKeyframeAssetId?: string;
+      selectedVideoAssetId?: string;
+    }[],
+    assets: [] as {
+      id: string;
+      episodeId?: string;
+      shotId?: string;
+      scriptBlockId?: string;
+      kind: string;
+    }[],
+    edits: [{ episodeId: "episode-001", videoTrack: [] as unknown[] }],
+  };
+
+  it("derives each next step without persisting a workflow state machine", () => {
+    expect(workflowSummary(base, "episode-001").next).toBe("script");
+    const script = {
+      ...base,
+      episodes: [
+        {
+          id: "episode-001",
+          scriptBlocks: [{ id: "block-1", kind: "dialogue" }],
+        },
+      ],
+    };
+    expect(workflowSummary(script, "episode-001").next).toBe("shots");
+    const shots = { ...script, shots: [{ episodeId: "episode-001" }] };
+    expect(workflowSummary(shots, "episode-001").next).toBe("keyframes");
+    const keyframe = {
+      ...shots,
+      shots: [{ episodeId: "episode-001", selectedKeyframeAssetId: "image-1" }],
+    };
+    expect(workflowSummary(keyframe, "episode-001").next).toBe("videos");
+    const video = {
+      ...keyframe,
+      shots: [
+        {
+          episodeId: "episode-001",
+          selectedKeyframeAssetId: "image-1",
+          selectedVideoAssetId: "video-1",
+        },
+      ],
+    };
+    expect(workflowSummary(video, "episode-001").next).toBe("voices");
+    const voice = {
+      ...video,
+      episodes: [
+        {
+          id: "episode-001",
+          scriptBlocks: [
+            {
+              id: "block-1",
+              kind: "dialogue",
+              selectedVoiceAssetId: "audio-1",
+            },
+          ],
+        },
+      ],
+      assets: [
+        {
+          id: "audio-1",
+          episodeId: "episode-001",
+          scriptBlockId: "block-1",
+          kind: "audio",
+        },
+      ],
+    };
+    expect(workflowSummary(voice, "episode-001").next).toBe("edit");
+    const edit = {
+      ...voice,
+      edits: [{ episodeId: "episode-001", videoTrack: [{}] }],
+    };
+    expect(workflowSummary(edit, "episode-001").next).toBe("render");
+  });
+
+  it("classifies assets and polls only active provider video runs", () => {
+    const groups = partitionAssets([
+      { id: "i", kind: "image" },
+      { id: "r", kind: "reference" },
+      { id: "v", kind: "video" },
+      { id: "a", kind: "audio" },
+      { id: "o", kind: "render" },
+    ]);
+    expect([
+      groups.images.length,
+      groups.references.length,
+      groups.videos.length,
+      groups.audio.length,
+      groups.renders.length,
+    ]).toEqual([1, 1, 1, 1, 1]);
+    expect(
+      activeProviderRunIDs([
+        {
+          id: "run-1",
+          operation: "video_generate",
+          status: "running",
+          providerJobId: "job-1",
+        },
+        { id: "run-2", operation: "episode_render", status: "running" },
+        {
+          id: "run-3",
+          operation: "video_generate",
+          status: "succeeded",
+          providerJobId: "job-3",
+        },
+      ]),
+    ).toEqual(["run-1"]);
+  });
+
+  it("rejects gaps and invalid trims in the fixed video track", () => {
+    expect(
+      fixedTimelineValid([
+        { order: 0, inSeconds: 0, outSeconds: 4 },
+        { order: 1, inSeconds: 1, outSeconds: 3 },
+      ]),
+    ).toBe(true);
+    expect(
+      fixedTimelineValid([
+        { order: 0, inSeconds: 0, outSeconds: 4 },
+        { order: 2, inSeconds: 0, outSeconds: 4 },
+      ]),
+    ).toBe(false);
+    expect(
+      fixedTimelineValid([{ order: 0, inSeconds: 4, outSeconds: 4 }]),
+    ).toBe(false);
   });
 });

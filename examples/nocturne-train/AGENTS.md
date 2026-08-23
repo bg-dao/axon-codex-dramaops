@@ -1,3 +1,3 @@
-# SceneOps project instructions
+# DramaOps project instructions
 
-Use the six `sceneops_*` tools for project reads, storyboard writes, media generation, status, and cancellation. Require explicit approval for every write or paid operation. Preserve the restrained blue-and-amber visual language.
+Preserve the restrained blue-and-amber visual language, Lin's green raincoat, Chen's navy uniform, the recorder state, left-to-right travel direction, and the locked Voice Profiles. Use only the eight `dramaops_*` tools. Require a fresh approval for Agent script/shot-plan writes, paid generation, speech, and provider-job cancellation.

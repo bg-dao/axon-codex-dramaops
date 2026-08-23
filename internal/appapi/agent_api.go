@@ -3,23 +3,15 @@ package appapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/appserver"
+	"github.com/bg-dao/axon-codex-dramaops/internal/appserver"
+	"github.com/bg-dao/axon-codex-dramaops/internal/domain"
 )
 
 type AgentAPI struct{ backend *Backend }
-
-const storyboardPrompt = `Build the initial SceneOps storyboard from the current creative brief.
-
-Rules:
-1. Call sceneops_project_read first and use its brief as the source of truth.
-2. Create exactly 3 scenes and 6 shots total. Use stable IDs such as scene-01 and shot-01.
-3. Give every shot a concise title and a production-ready visual prompt covering composition, lighting, camera, mood, and motion.
-4. Default every shot to 16:9 and 4 seconds.
-5. Call sceneops_storyboard_apply exactly once.
-6. Do not edit files, execute shell commands, generate paid media, or call any other SceneOps write tool.`
 
 func NewAgentAPI(backend *Backend) *AgentAPI { return &AgentAPI{backend: backend} }
 
@@ -51,6 +43,9 @@ func (a *AgentAPI) StartChatGPTLogin() (map[string]any, error) {
 }
 
 func (a *AgentAPI) StartTurn(prompt string) (appserver.Turn, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return appserver.Turn{}, errors.New("prompt is required")
+	}
 	session, err := a.backend.Session()
 	if err != nil {
 		return appserver.Turn{}, err
@@ -60,26 +55,76 @@ func (a *AgentAPI) StartTurn(prompt string) (appserver.Turn, error) {
 	return session.StartTurn(ctx, prompt)
 }
 
-func (a *AgentAPI) GenerateStoryboard() (appserver.Turn, error) {
-	root, err := a.backend.Root()
+func (a *AgentAPI) GenerateScript(episodeID string) (appserver.Turn, error) {
+	snapshot, episode, err := a.episode(episodeID)
 	if err != nil {
 		return appserver.Turn{}, err
 	}
-	snapshot, err := a.backend.store.Open(root)
-	if err != nil {
-		return appserver.Turn{}, err
+	if len(episode.ScriptBlocks) > 0 || len(episode.SceneIDs) > 0 {
+		return appserver.Turn{}, errors.New("episode script already exists; edit it directly instead")
 	}
-	brief := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(snapshot.Brief), "# Creative brief"))
-	if brief == "" || brief == "Describe the story, audience, visual language, and delivery constraints." {
-		return appserver.Turn{}, errors.New("save a creative brief before generating a storyboard")
-	}
-	if len(snapshot.Scenes) > 0 || len(snapshot.Shots) > 0 {
-		return appserver.Turn{}, errors.New("storyboard already exists; refine the existing scenes and shots instead")
+	if strings.TrimSpace(episode.Logline) == "" && strings.TrimSpace(episode.Synopsis) == "" {
+		return appserver.Turn{}, errors.New("add an episode logline or synopsis before generating the script")
 	}
 	if err := a.Start(); err != nil {
 		return appserver.Turn{}, err
 	}
-	return a.StartTurn(storyboardPrompt)
+	prompt := fmt.Sprintf(`Create the initial structured short-drama script and series bible for episode %s.
+
+Rules:
+1. Call dramaops_project_read first. Use the target episode logline, synopsis, content language, output format, and existing series bible as truth.
+2. Write a production-ready 60–90 second episode with exactly 3 scenes, clear dramatic escalation, and a final hook.
+3. Use stable IDs prefixed by the episode ID. Script blocks may only be action, dialogue, voice_over, sfx, or music.
+4. Define only the characters, locations, and props needed for this episode. Every character must have one built_in Voice Profile.
+5. Call dramaops_script_apply exactly once for episode %s.
+6. Do not write files, execute commands, create custom voices, generate media, or call another write tool.`, episodeID, episodeID)
+	_ = snapshot
+	return a.StartTurn(prompt)
+}
+
+func (a *AgentAPI) GenerateShotPlan(episodeID string) (appserver.Turn, error) {
+	snapshot, episode, err := a.episode(episodeID)
+	if err != nil {
+		return appserver.Turn{}, err
+	}
+	if len(episode.ScriptBlocks) == 0 {
+		return appserver.Turn{}, errors.New("create the episode script before planning shots")
+	}
+	for _, shot := range snapshot.Shots {
+		if shot.EpisodeID == episodeID {
+			return appserver.Turn{}, errors.New("episode shot plan already exists; edit shots directly instead")
+		}
+	}
+	if err := a.Start(); err != nil {
+		return appserver.Turn{}, err
+	}
+	prompt := fmt.Sprintf(`Build the professional short-drama shot plan for episode %s.
+
+Rules:
+1. Call dramaops_project_read first and use its episode script and bibles as truth.
+2. Create exactly 8 shots covering every script block in story order. Match the project's output aspect ratio (normally 9:16) and use a total duration of 60–90 seconds.
+3. Every shot must include shotSize, cameraAngle, cameraMovement, lensMm, composition, focusSubject, blocking, lighting, screenDirection, eyeLine, characterIds, propIds, wardrobeContinuity, propContinuity, transition, and a production-ready visual prompt.
+4. Maintain the 180-degree rule, eye-line continuity, wardrobe, prop state, and screen direction unless the script explicitly motivates a change.
+5. Call dramaops_shotplan_apply exactly once for episode %s.
+6. Do not write files, execute commands, generate media, or call another write tool.`, episodeID, episodeID)
+	return a.StartTurn(prompt)
+}
+
+func (a *AgentAPI) episode(episodeID string) (domain.Snapshot, domain.Episode, error) {
+	root, err := a.backend.Root()
+	if err != nil {
+		return domain.Snapshot{}, domain.Episode{}, err
+	}
+	snapshot, err := a.backend.store.Open(root)
+	if err != nil {
+		return domain.Snapshot{}, domain.Episode{}, err
+	}
+	for _, episode := range snapshot.Episodes {
+		if episode.ID == episodeID {
+			return snapshot, episode, nil
+		}
+	}
+	return snapshot, domain.Episode{}, fmt.Errorf("episode %s not found", episodeID)
 }
 
 func (a *AgentAPI) InterruptTurn(threadID, turnID string) error {

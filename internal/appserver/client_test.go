@@ -16,7 +16,7 @@ func TestClientCorrelatesResponsesStreamsEventsAndApproves(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=TestAppServerHelperProcess")
-	command.Env = append(os.Environ(), "SCENEOPS_APP_SERVER_HELPER=1")
+	command.Env = append(os.Environ(), "DRAMAOPS_APP_SERVER_HELPER=1")
 	events := make(chan Event, 20)
 	client, err := startClientCommand(ctx, command, func(event Event) { events <- event })
 	if err != nil {
@@ -49,7 +49,7 @@ func TestClientCorrelatesResponsesStreamsEventsAndApproves(t *testing.T) {
 				}
 				approved = true
 			}
-			if event.Method == "sceneops/runtime/stderr" {
+			if event.Method == "dramaops/runtime/stderr" {
 				if strings.Contains(string(event.Params), "sk-helpersecret") {
 					t.Fatalf("stderr leaked a secret: %s", event.Params)
 				}
@@ -68,7 +68,7 @@ func TestClientContextCancellationRemovesPendingRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=TestAppServerHelperProcess")
-	command.Env = append(os.Environ(), "SCENEOPS_APP_SERVER_HELPER=1")
+	command.Env = append(os.Environ(), "DRAMAOPS_APP_SERVER_HELPER=1")
 	client, err := startClientCommand(ctx, command, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestClientContextCancellationRemovesPendingRequest(t *testing.T) {
 }
 
 func TestAppServerHelperProcess(t *testing.T) {
-	if os.Getenv("SCENEOPS_APP_SERVER_HELPER") != "1" {
+	if os.Getenv("DRAMAOPS_APP_SERVER_HELPER") != "1" {
 		return
 	}
 	fmt.Fprintln(os.Stderr, "api_key=sk-helpersecret")

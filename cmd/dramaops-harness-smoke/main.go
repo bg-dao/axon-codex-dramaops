@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/appserver"
-	codexruntime "github.com/bg-dao/axon-codex-sceneops/internal/runtime"
+	"github.com/bg-dao/axon-codex-dramaops/internal/appserver"
+	codexruntime "github.com/bg-dao/axon-codex-dramaops/internal/runtime"
 )
 
 func main() {
-	projectRoot := flag.String("project", "", "absolute SceneOps project root")
-	mcpCommand := flag.String("mcp-command", "", "SceneOps desktop or sceneops-mcp executable")
+	projectRoot := flag.String("project", "", "absolute DramaOps project root")
+	mcpCommand := flag.String("mcp-command", "", "DramaOps desktop or dramaops-mcp executable")
 	prompt := flag.String("prompt", "", "optional no-side-effect turn prompt")
 	useSystemCodex := flag.Bool("use-system-codex", false, "use the detected system Codex instead of installing the pinned runtime")
 	legacySandboxWire := flag.Bool("legacy-sandbox-wire", false, "use prerelease kebab-case sandbox wire values")
@@ -39,8 +39,10 @@ func main() {
 		codexPath = runtimeStatus.Path
 	}
 	threadSandboxWire := "workspaceWrite"
+	approvalWire := "onRequest"
 	if *legacySandboxWire {
 		threadSandboxWire = "workspace-write"
+		approvalWire = "on-request"
 	}
 	events := make(chan appserver.Event, 256)
 	var client *appserver.Client
@@ -64,7 +66,7 @@ func main() {
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
-	if err := client.Request(ctx, "thread/start", map[string]any{"cwd": *projectRoot, "approvalPolicy": "on-request", "sandbox": threadSandboxWire, "serviceName": "sceneops_smoke"}, &thread); err != nil {
+	if err := client.Request(ctx, "thread/start", map[string]any{"cwd": *projectRoot, "approvalPolicy": approvalWire, "sandbox": threadSandboxWire, "serviceName": "dramaops_smoke"}, &thread); err != nil {
 		fatal(err)
 	}
 	if thread.Thread.ID == "" {
@@ -83,8 +85,8 @@ func main() {
 		"threadId":       thread.Thread.ID,
 		"input":          []map[string]any{{"type": "text", "text": *prompt}},
 		"cwd":            *projectRoot,
-		"approvalPolicy": "on-request",
-		"sandboxPolicy":  map[string]any{"type": "workspaceWrite", "writableRoots": []string{*projectRoot}, "networkAccess": false},
+		"approvalPolicy": approvalWire,
+		"sandboxPolicy":  map[string]any{"type": threadSandboxWire, "writableRoots": []string{*projectRoot}, "networkAccess": false},
 	}, &turn); err != nil {
 		fatal(err)
 	}
@@ -112,7 +114,7 @@ func main() {
 				if !retry.WillRetry {
 					fatal(fmt.Errorf("app-server event %s: %s", event.Method, event.Params))
 				}
-			case "sceneops/runtime/failed":
+			case "dramaops/runtime/failed":
 				fatal(fmt.Errorf("app-server event %s: %s", event.Method, event.Params))
 			}
 		}

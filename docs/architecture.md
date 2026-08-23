@@ -1,52 +1,52 @@
-# SceneOps architecture
+# DramaOps architecture
 
-SceneOps is a local Wails desktop application with two deliberately separate AI paths:
-
-1. Codex app-server owns ChatGPT authentication, durable agent threads, turns, streamed events, command/file approvals, and the Codex sandbox.
-2. `MediaProvider` owns paid image and video generation using a separate provider credential.
-
-The separation prevents a ChatGPT login from becoming an implicit media-spend credential.
-
-## Runtime topology
+DramaOps is a local Wails application with four narrow subsystems:
 
 ```text
-SceneOps desktop process
-├── Wails APIs and event bridge
-├── Project store and rebuildable SQLite index
-├── Codex app-server child process (one per active project)
-│   └── SceneOps MCP child mode
-└── Keychain-backed MediaProvider
+Desktop process
+├── Wails APIs + dramaops:* event bridge
+├── Manifest store + rebuildable SQLite index
+├── Codex app-server process + DramaOps stdio MCP
+├── Image / Video / Speech provider adapters
+└── FFmpeg probe + fixed-timeline render engine
 ```
 
-The Go process starts `codex app-server --stdio` and communicates with newline-delimited JSON messages. It performs `initialize`/`initialized`, then uses stable `account/*`, `thread/*`, and `turn/*` methods. It does not opt into `experimentalApi` or dynamic tools.
+## Agent boundary
 
-Each thread starts with:
+Codex app-server owns ChatGPT authentication, durable threads, turns, streaming events, command/file approvals, and sandbox policy. DramaOps communicates over newline-delimited JSON-RPC using stable app-server methods; it does not opt into `experimentalApi` or dynamic tools.
 
-- project root as `cwd`;
-- `approvalPolicy: on-request`;
-- `sandbox: workspaceWrite`;
-- `serviceName: sceneops`.
+Each active project uses its root as `cwd`, `workspaceWrite` sandboxing, and `onRequest` approval. The MCP server is injected with temporary command-line configuration. DramaOps never edits `~/.codex/config.toml`.
 
-The SceneOps MCP server is injected with command-line `--config` overrides for `mcp_servers.sceneops`. SceneOps never writes `~/.codex/config.toml`.
+Agent actions are limited to reading the current series and proposing initial structured scripts or shot plans through the eight public MCP tools. Script writes, shot-plan writes, paid media, paid speech, and provider-job cancellation require one-time approval.
 
-## Crash and recovery boundary
+## Data and capability boundaries
 
-The app-server process is restarted once after an unexpected exit. The active thread ID is stored in `sceneops.project.json`; after restart, SceneOps sends `thread/resume`. A second exit fails visibly with diagnostics instead of entering a restart loop.
+JSON manifests and media files are durable truth. `.dramaops/index.sqlite` is disposable derived state. Workflow progress and continuity issues are recomputed from a `Snapshot` rather than stored as another state machine.
 
-Media jobs store the provider job ID in `runs/<run-id>.json`. The desktop app polls active video runs every two seconds while a project is open. Polling after restart refreshes the provider status and downloads a completed result idempotently. An asset with the same run ID is reused instead of duplicated.
+Image, video, speech, and optional sound providers are independent capability interfaces. A provider never has to fake a feature it does not implement. Provider/model/request details live in asset provenance; project and timeline types remain provider-neutral.
 
-## Data ownership
+The OpenAI media key is separate from ChatGPT authentication. Custom Voice Profile bindings are device-local secrets. Neither secret enters project manifests, the index, logs, or exports.
 
-JSON manifests and media bytes are durable truth. `.sceneops/index.sqlite` contains only derived list/search state. `RebuildIndex` drops derived rows and repopulates them from project manifests.
+## Consistency model
 
-Core types do not name OpenAI, GPT Image, or a video model. Those values exist only in `Provenance` or the OpenAI adapter.
+- Image requests assemble style, character, location, prop, and shot references within provider limits.
+- Video requests use the selected keyframe first and may add supported continuity roles such as a previous-shot tail frame.
+- Dialogue is generated only with the speaking character's locked Voice Profile.
+- Environment audio, motifs, and BGM are reused by asset ID through the series Sound Palette.
+- The continuity checker derives missing-reference, voice, wardrobe, prop, screen-direction, media-spec, timeline, and dialogue warnings.
 
-The guided workflow is derived from the current snapshot rather than persisted as another state machine. `brief.md`, scenes, shots, selected image assets, videos, and runs determine the next suggested action.
+Consistency means locked references, metadata, adjacent-shot checks, Voice Profiles, and media conforming. It does not claim that a generative model will reproduce a subject perfectly.
 
-External video import is the stable v0.1 path. A provider may optionally accept the selected keyframe as a verified local reference. The OpenAI Videos adapter is exposed only as an experimental, capability-gated implementation because that API is deprecated and scheduled to shut down on September 24, 2026.
+## Fixed edit and recovery
+
+Each episode has one ordered video track and dialogue, SFX, BGM, and subtitle lanes. The renderer supports trim, `cut | dissolve | fade`, `cover | contain`, gain, loop, BGM ducking, SRT output, optional subtitle burn-in, loudness normalization, and H.264/AAC delivery.
+
+Provider job IDs and render runs are persisted. Completed provider downloads are idempotent by run ID. An interrupted local render is marked failed on restart and relaunched as a new run that records `recoveredFrom`, avoiding ambiguous reuse of a partial output.
 
 ## References
 
 - [Codex app-server](https://developers.openai.com/codex/app-server)
-- [GPT Image 2](https://developers.openai.com/api/docs/models/gpt-image-2)
-- [Create video API](https://developers.openai.com/api/reference/typescript/resources/videos/methods/create)
+- [OpenAI image generation](https://developers.openai.com/api/docs/guides/image-generation)
+- [OpenAI speech](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create)
+- [OpenAI voice consent](https://developers.openai.com/api/reference/resources/audio/subresources/voice_consents/methods/create)
+- [OpenAI Videos API](https://developers.openai.com/api/reference/typescript/resources/videos/methods/create)

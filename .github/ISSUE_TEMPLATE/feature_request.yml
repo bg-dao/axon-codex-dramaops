@@ -19,7 +19,7 @@ body:
   - type: checkboxes
     id: boundaries
     attributes:
-      label: v0.1 boundaries
+      label: v0.2 boundaries
       options:
         - label: This does not require cloud sync or multi-user collaboration.
         - label: This preserves provider-neutral project schemas.

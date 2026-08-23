@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "example-nocturne-train",
+  "name": "Nocturne Train",
+  "contentLanguage": "en",
+  "activeEpisodeId": "episode-001",
+  "styleBible": {
+    "visualStyle": "Restrained cinematic realism, tactile analog detail, vertical compositions with negative space",
+    "colorPalette": ["midnight blue", "wet steel", "sodium amber", "dawn cream"],
+    "lightingRules": "Cold blue night exteriors; one motivated amber practical; dawn gradually warms without changing skin tone",
+    "negativePrompt": "glossy commercial polish, neon cyberpunk, wardrobe changes, extra fingers, text overlays"
+  },
+  "soundPalette": {
+    "notes": "Reuse the same rain bed, carriage rail rhythm, three soft tape clicks, recorder motor flutter, and restrained piano motif across the episode. Imported palette entries are stored here by asset ID."
+  },
+  "output": {
+    "orientation": "portrait",
+    "width": 1080,
+    "height": 1920,
+    "fps": 25,
+    "videoCodec": "h264",
+    "audioCodec": "aac",
+    "audioSampleRate": 48000,
+    "audioChannels": 2,
+    "loudnessLufs": -16,
+    "truePeakDbtp": -1,
+    "burnSubtitles": true,
+    "subtitleSafeArea": 0.12
+  },
+  "createdAt": "2026-08-23T00:00:00Z",
+  "updatedAt": "2026-08-23T00:00:00Z"
+}

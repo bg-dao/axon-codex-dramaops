@@ -1,4 +1,4 @@
-module github.com/bg-dao/axon-codex-sceneops
+module github.com/bg-dao/axon-codex-dramaops
 
 go 1.25.0
 

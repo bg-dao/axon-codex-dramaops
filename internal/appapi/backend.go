@@ -8,52 +8,70 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/approval"
-	"github.com/bg-dao/axon-codex-sceneops/internal/appserver"
-	"github.com/bg-dao/axon-codex-sceneops/internal/media"
-	"github.com/bg-dao/axon-codex-sceneops/internal/project"
-	"github.com/bg-dao/axon-codex-sceneops/internal/provider"
-	codexruntime "github.com/bg-dao/axon-codex-sceneops/internal/runtime"
-	"github.com/bg-dao/axon-codex-sceneops/internal/secret"
+	"github.com/bg-dao/axon-codex-dramaops/internal/approval"
+	"github.com/bg-dao/axon-codex-dramaops/internal/appserver"
+	"github.com/bg-dao/axon-codex-dramaops/internal/media"
+	"github.com/bg-dao/axon-codex-dramaops/internal/project"
+	"github.com/bg-dao/axon-codex-dramaops/internal/provider"
+	renderengine "github.com/bg-dao/axon-codex-dramaops/internal/render"
+	codexruntime "github.com/bg-dao/axon-codex-dramaops/internal/runtime"
+	"github.com/bg-dao/axon-codex-dramaops/internal/secret"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
-	EventAgent             = "sceneops:agent-event"
-	EventApprovalRequested = "sceneops:approval-requested"
-	EventApprovalResolved  = "sceneops:approval-resolved"
-	EventRunUpdated        = "sceneops:run-updated"
-	EventProjectChanged    = "sceneops:project-changed"
-	EventRuntimeProgress   = "sceneops:runtime-progress"
+	EventAgent             = "dramaops:agent-event"
+	EventApprovalRequested = "dramaops:approval-requested"
+	EventApprovalResolved  = "dramaops:approval-resolved"
+	EventRunUpdated        = "dramaops:run-updated"
+	EventProjectChanged    = "dramaops:project-changed"
+	EventRuntimeProgress   = "dramaops:runtime-progress"
+	EventRenderProgress    = "dramaops:render-progress"
 )
 
 type Backend struct {
-	mu             sync.RWMutex
-	ctx            context.Context
-	store          *project.Store
-	secrets        secret.Store
-	runtimeManager *codexruntime.Manager
-	provider       provider.MediaProvider
-	root           string
-	gate           *approval.FileGate
-	media          *media.Service
-	session        *appserver.Session
-	monitorCancel  context.CancelFunc
+	mu               sync.RWMutex
+	continuityMu     sync.Mutex
+	ctx              context.Context
+	store            *project.Store
+	secrets          secret.Store
+	runtimeManager   *codexruntime.Manager
+	imageProvider    provider.ImageProvider
+	videoProvider    provider.VideoProvider
+	speechProvider   provider.SpeechProvider
+	root             string
+	gate             *approval.FileGate
+	approvalOverride approval.Gate
+	media            *media.Service
+	session          *appserver.Session
+	monitorCancel    context.CancelFunc
+	renderCancels    map[string]context.CancelFunc
+	renderRuntime    renderengine.RuntimeStatus
 }
 
 func NewBackend() *Backend {
-	backend := &Backend{store: project.NewStore(), secrets: secret.NewKeyringStore()}
+	backend := &Backend{store: project.NewStore(), secrets: secret.NewKeyringStore(), renderCancels: make(map[string]context.CancelFunc)}
 	backend.runtimeManager = &codexruntime.Manager{Progress: func(progress codexruntime.Progress) {
 		backend.emit(EventRuntimeProgress, progress)
 	}}
-	backend.provider = provider.NewOpenAI(func() (string, error) { return backend.secrets.Get(secret.OpenAIKeyEntry) })
+	openAI := provider.NewOpenAI(func() (string, error) { return backend.secrets.Get(secret.OpenAIKeyEntry) })
+	backend.imageProvider, backend.videoProvider, backend.speechProvider = openAI, openAI, openAI
 	return backend
 }
 
 func NewBackendForTest(secrets secret.Store, mediaProvider provider.MediaProvider) *Backend {
 	backend := NewBackend()
 	backend.secrets = secrets
-	backend.provider = mediaProvider
+	backend.imageProvider, backend.videoProvider = mediaProvider, mediaProvider
+	if speech, ok := mediaProvider.(provider.SpeechProvider); ok {
+		backend.speechProvider = speech
+	}
+	return backend
+}
+
+func NewBackendForProviders(secrets secret.Store, image provider.ImageProvider, video provider.VideoProvider, speech provider.SpeechProvider) *Backend {
+	backend := NewBackend()
+	backend.secrets, backend.imageProvider, backend.videoProvider, backend.speechProvider = secrets, image, video, speech
 	return backend
 }
 
@@ -64,6 +82,10 @@ func (b *Backend) Shutdown(_ context.Context) {
 	if b.monitorCancel != nil {
 		b.monitorCancel()
 	}
+	for _, cancel := range b.renderCancels {
+		cancel()
+	}
+	b.renderCancels = make(map[string]context.CancelFunc)
 	session := b.session
 	b.session = nil
 	b.mu.Unlock()
@@ -84,7 +106,10 @@ func (b *Backend) SetProject(root string) error {
 	b.session = nil
 	b.root = root
 	b.gate = approval.NewFileGate(root)
-	b.media = &media.Service{Root: root, Store: b.store, Provider: b.provider, Approval: b.gate}
+	b.media = &media.Service{
+		Root: root, Store: b.store, Image: b.imageProvider, Video: b.videoProvider, Speech: b.speechProvider, Approval: b.gate,
+		ResolveVoice: func(profileID string) (string, error) { return secret.ResolveVoiceBinding(b.secrets, profileID) },
+	}
 	monitorCtx, cancel := context.WithCancel(b.context())
 	b.monitorCancel = cancel
 	b.mu.Unlock()
@@ -92,6 +117,7 @@ func (b *Backend) SetProject(root string) error {
 		_ = oldSession.Close()
 	}
 	go b.monitor(monitorCtx, root)
+	go NewRenderAPI(b).recover(root)
 	return nil
 }
 
@@ -99,7 +125,7 @@ func (b *Backend) Root() (string, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if b.root == "" {
-		return "", errors.New("no SceneOps project is open")
+		return "", errors.New("no DramaOps project is open")
 	}
 	return b.root, nil
 }
@@ -108,7 +134,7 @@ func (b *Backend) Media() (*media.Service, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if b.media == nil {
-		return nil, errors.New("no SceneOps project is open")
+		return nil, errors.New("no DramaOps project is open")
 	}
 	return b.media, nil
 }
@@ -117,7 +143,19 @@ func (b *Backend) Gate() (*approval.FileGate, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if b.gate == nil {
-		return nil, errors.New("no SceneOps project is open")
+		return nil, errors.New("no DramaOps project is open")
+	}
+	return b.gate, nil
+}
+
+func (b *Backend) ApprovalGate() (approval.Gate, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.approvalOverride != nil {
+		return b.approvalOverride, nil
+	}
+	if b.gate == nil {
+		return nil, errors.New("no DramaOps approval gate is available")
 	}
 	return b.gate, nil
 }

@@ -1,30 +1,37 @@
 # Security model
 
-## Credentials
+## Credentials and voice consent
 
-The OpenAI media API key is stored under Keychain service `dev.bg-dao.sceneops`, account `openai-media-api-key`. Wails exposes only configured/not-configured state. The plaintext value is never returned to React.
+The OpenAI media key is stored under macOS Keychain service `dev.bg-dao.dramaops`, account `openai-media-api-key`. The UI receives only configured/not-configured state. Codex authentication remains inside the Codex runtime.
 
-Codex authentication remains inside the Codex runtime and is accessed through the stable app-server account methods. SceneOps does not copy Codex tokens into its own settings.
+Custom voices require explicit authorization plus a consent recording and sample. The provider voice ID and consent ID are bound to separate device-local Keychain entries. Provider voice IDs, consent IDs, recordings, samples, and API keys are excluded from snapshots, manifests, SQLite, logs, and exports.
 
 ## Project boundary
 
-`ResolveRelative` rejects absolute paths, `..`, and symlink traversal. New writes use a temporary file in the destination directory, `fsync`, and atomic rename. Downloads are hashed before their manifest is committed.
+Project paths are normalized and relative. Absolute paths, parent traversal, and symlink components are rejected. Manifest and media writes use temporary sibling files, sync, and atomic rename. Imported or downloaded bytes are hashed before the manifest becomes durable.
 
 ## Approval boundary
 
-The following operations require a fresh approval:
+A fresh approval is required for:
 
-- structured storyboard apply;
+- Agent script apply;
+- Agent shot-plan apply;
 - image generation;
 - video generation;
-- media job cancellation.
+- speech generation;
+- custom voice creation;
+- provider-job cancellation.
 
-There is no "always approve paid generation" option. Codex command and file approvals expose only `accept`, `decline`, and `cancel` in SceneOps; session-wide acceptance is intentionally not supported.
+Direct UI edits and local FFmpeg rendering do not trigger a second approval. There is no permanent approval option for paid work.
 
 ## Runtime supply chain
 
-SceneOps first detects a compatible system Codex. Fallback installation uses the checked-in `internal/runtime/codex-runtime.json`; it never follows `latest` at runtime. The downloaded archive must match its checked-in SHA-256 before extraction, archive traversal is rejected, and the installed binary must report the pinned version.
+DramaOps prefers compatible system runtimes. Codex fallback installation is locked by repository manifest, architecture, version, archive type, and SHA-256; archive traversal and post-install version mismatches fail closed.
 
-## Logging and export
+FFmpeg execution requires both `ffmpeg` and `ffprobe` plus `h264_videotoolbox`. A managed FFmpeg fallback may be enabled only by a checked-in artifact manifest with exact SHA-256 and bundled license/source-offer notices. An absent or unverified artifact is never downloaded or launched.
 
-Known API-key and bearer-token patterns are redacted from runtime and provider errors. `.sceneops/` is excluded from exports. No telemetry or cloud backend is enabled by default.
+## Provider and export boundary
+
+Provider/model details are isolated to adapters and provenance. Reference assets are resolved through the project path boundary and re-hashed before they are sent. Provider errors pass through secret-pattern redaction.
+
+Project packages include story and edit manifests, assets, renders, SRT, Fountain, continuity reports, and provenance. `.dramaops/`, Git metadata, API keys, device-only voice bindings, consent recordings, and samples are excluded.

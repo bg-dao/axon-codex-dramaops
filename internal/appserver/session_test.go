@@ -7,9 +7,9 @@ import (
 )
 
 func TestAppServerArgsUseTemporaryMCPOverrides(t *testing.T) {
-	args := AppServerArgs("/Applications/SceneOps.app/Contents/MacOS/SceneOps", "/tmp/my film")
+	args := AppServerArgs("/Applications/DramaOps.app/Contents/MacOS/DramaOps", "/tmp/my film")
 	joined := strings.Join(args, " ")
-	for _, fragment := range []string{"app-server", "--stdio", "mcp_servers.sceneops.command", "mcp_servers.sceneops.args", "mcp_servers.sceneops.required=true"} {
+	for _, fragment := range []string{"app-server", "--stdio", "mcp_servers.dramaops.command", "mcp_servers.dramaops.args", "mcp_servers.dramaops.required=true"} {
 		if !strings.Contains(joined, fragment) {
 			t.Fatalf("args missing %q: %v", fragment, args)
 		}

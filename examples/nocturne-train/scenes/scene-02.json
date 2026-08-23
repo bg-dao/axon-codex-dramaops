@@ -1,10 +1,1 @@
-{
-  "schemaVersion": 1,
-  "id": "scene-02",
-  "title": "Signal in motion",
-  "summary": "Inside the moving carriage, the recording begins to reveal its meaning.",
-  "order": 1,
-  "shotIds": ["shot-03", "shot-04"],
-  "createdAt": "2026-08-23T00:00:00Z",
-  "updatedAt": "2026-08-23T00:00:00Z"
-}
+{"schemaVersion":1,"id":"scene-02","episodeId":"episode-001","title":"INT. NIGHT CARRIAGE - MOVING","summary":"Chen repairs the recorder and the lost voice reveals an instruction.","locationId":"location-carriage","timeOfDay":"night","order":1,"shotIds":["shot-04","shot-05","shot-06"],"createdAt":"2026-08-23T00:00:00Z","updatedAt":"2026-08-23T00:00:00Z"}

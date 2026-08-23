@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/redact"
+	"github.com/bg-dao/axon-codex-dramaops/internal/redact"
 )
 
 type Event struct {
@@ -99,7 +99,7 @@ func startClientCommand(ctx context.Context, command *exec.Cmd, onEvent func(Eve
 	defer cancel()
 	var initialized map[string]any
 	if err := client.Request(initCtx, "initialize", map[string]any{
-		"clientInfo": map[string]any{"name": "sceneops", "title": "SceneOps by Axon", "version": "0.1.0"},
+		"clientInfo": map[string]any{"name": "dramaops", "title": "DramaOps by Axon", "version": "0.2.0"},
 	}, &initialized); err != nil {
 		_ = client.Close()
 		return nil, err
@@ -217,7 +217,7 @@ func (c *Client) readLoop(reader io.Reader) {
 			Error  *RPCError       `json:"error"`
 		}
 		if err := json.Unmarshal(line, &envelope); err != nil {
-			c.emit(Event{Method: "sceneops/protocol/error", Params: mustJSON(map[string]any{"message": "invalid JSON from app-server"}), Timestamp: time.Now().UTC()})
+			c.emit(Event{Method: "dramaops/protocol/error", Params: mustJSON(map[string]any{"message": "invalid JSON from app-server"}), Timestamp: time.Now().UTC()})
 			continue
 		}
 		if len(envelope.ID) > 0 && envelope.Method == "" {
@@ -256,7 +256,7 @@ func (c *Client) stderrLoop(reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		message := redact.String(scanner.Text())
-		c.emit(Event{Method: "sceneops/runtime/stderr", Params: mustJSON(map[string]any{"message": message}), Timestamp: time.Now().UTC()})
+		c.emit(Event{Method: "dramaops/runtime/stderr", Params: mustJSON(map[string]any{"message": message}), Timestamp: time.Now().UTC()})
 	}
 }
 

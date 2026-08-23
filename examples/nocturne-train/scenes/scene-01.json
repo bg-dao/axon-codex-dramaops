@@ -1,10 +1,1 @@
-{
-  "schemaVersion": 1,
-  "id": "scene-01",
-  "title": "The last platform",
-  "summary": "The engineer reaches an almost empty mountain station as the final train arrives.",
-  "order": 0,
-  "shotIds": ["shot-01", "shot-02"],
-  "createdAt": "2026-08-23T00:00:00Z",
-  "updatedAt": "2026-08-23T00:00:00Z"
-}
+{"schemaVersion":1,"id":"scene-01","episodeId":"episode-001","title":"EXT. MOUNTAIN PLATFORM - NIGHT","summary":"Lin catches the final train as the recorder briefly wakes.","locationId":"location-platform","timeOfDay":"night","order":0,"shotIds":["shot-01","shot-02","shot-03"],"createdAt":"2026-08-23T00:00:00Z","updatedAt":"2026-08-23T00:00:00Z"}

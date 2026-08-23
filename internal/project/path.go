@@ -19,7 +19,7 @@ func ValidateID(id string) error {
 }
 
 // ResolveRelative resolves rel inside root and rejects absolute paths, parent
-// traversal, and every symlink component. SceneOps intentionally treats
+// traversal, and every symlink component. DramaOps intentionally treats
 // project-internal symlinks as untrusted so a project cannot escape its root.
 func ResolveRelative(root, rel string) (string, error) {
 	if strings.TrimSpace(root) == "" {

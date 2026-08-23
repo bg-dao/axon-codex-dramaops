@@ -143,7 +143,7 @@ func (m *Manager) install(ctx context.Context, manifest Manifest, destination st
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", fmt.Errorf("download Codex runtime: %s", response.Status)
 	}
-	tmpDir, err := os.MkdirTemp("", "sceneops-codex-runtime-*")
+	tmpDir, err := os.MkdirTemp("", "dramaops-codex-runtime-*")
 	if err != nil {
 		return "", err
 	}
@@ -217,7 +217,7 @@ func privateRuntimePath(version string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(configDir, "SceneOps", "runtime", "codex", version, "codex"), nil
+	return filepath.Join(configDir, "DramaOps", "runtime", "codex", version, "codex"), nil
 }
 
 func extractCodexBinary(archivePath string) ([]byte, error) {

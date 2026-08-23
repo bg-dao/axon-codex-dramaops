@@ -10,17 +10,20 @@ import (
 	"sort"
 	"time"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/project"
+	"github.com/bg-dao/axon-codex-dramaops/internal/project"
 	"github.com/google/uuid"
 )
 
 type Action string
 
 const (
-	StoryboardApply Action = "storyboard_apply"
-	ImageGenerate   Action = "image_generate"
-	VideoGenerate   Action = "video_generate"
-	JobCancel       Action = "job_cancel"
+	ScriptApply    Action = "script_apply"
+	ShotPlanApply  Action = "shotplan_apply"
+	ImageGenerate  Action = "image_generate"
+	VideoGenerate  Action = "video_generate"
+	SpeechGenerate Action = "speech_generate"
+	VoiceCreate    Action = "voice_create"
+	JobCancel      Action = "job_cancel"
 )
 
 type Request struct {
@@ -103,7 +106,7 @@ func (g *FileGate) Resolve(id string, approved bool) (Decision, error) {
 }
 
 func (g *FileGate) Pending() ([]Request, error) {
-	dir, err := project.ResolveRelative(g.Root, filepath.Join(".sceneops", "approvals"))
+	dir, err := project.ResolveRelative(g.Root, filepath.Join(".dramaops", "approvals"))
 	if err != nil {
 		return nil, err
 	}
@@ -132,14 +135,14 @@ func (g *FileGate) requestPath(id string) (string, error) {
 	if err := project.ValidateID(id); err != nil {
 		return "", err
 	}
-	return project.ResolveRelative(g.Root, filepath.Join(".sceneops", "approvals", id+".request.json"))
+	return project.ResolveRelative(g.Root, filepath.Join(".dramaops", "approvals", id+".request.json"))
 }
 
 func (g *FileGate) decisionPath(id string) (string, error) {
 	if err := project.ValidateID(id); err != nil {
 		return "", err
 	}
-	return project.ResolveRelative(g.Root, filepath.Join(".sceneops", "approvals", id+".decision.json"))
+	return project.ResolveRelative(g.Root, filepath.Join(".dramaops", "approvals", id+".decision.json"))
 }
 
 func (g *FileGate) readDecision(id string) (Decision, bool, error) {

@@ -1,4 +1,4 @@
-# SceneOps Agent Guide
+# DramaOps Agent Guide
 
 This repository is a self-contained public project. Keep its source, dependencies, CI, and releases independently maintainable.
 
@@ -7,7 +7,7 @@ This repository is a self-contained public project. Keep its source, dependencie
 - JSON manifests and media files are durable truth. SQLite must remain disposable and rebuildable.
 - Never log, persist, export, or return a plaintext OpenAI API key.
 - Project paths must be normalized relative paths. Reject absolute paths, `..`, and symlink traversal.
-- Paid media generation, storyboard writes, and job cancellation require a fresh approval. Do not add a permanent allow option.
+- Agent script/shot-plan writes, paid media or speech generation, and provider-job cancellation require a fresh approval. Do not add a permanent allow option.
 - Keep core project types provider-neutral. Provider and model names belong in provenance and provider adapters.
 - Keep Codex stable-surface integration free of `experimentalApi` and dynamic tools.
 

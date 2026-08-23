@@ -1,69 +1,81 @@
-# SceneOps by Axon
+# DramaOps by Axon
 
 [English](README.md) | 简体中文
 
-**SceneOps — 一个由 Codex agent harness 驱动的开源多模态场景与资产工作台。**
+**DramaOps — 基于 Codex agent harness 的开源 AI 短剧工作台。**
 
-SceneOps 是一款面向独立创作者的本地优先桌面工作台。它将创作简报转化为结构化分镜、关键帧、视频镜头、版本决策以及可导出的资产与溯源包，同时确保项目文件清晰易懂且便于迁移。
+DramaOps 是一款本地优先的 AI 短剧制作桌面工作台。它把结构化剧本、人物与场景圣经、专业镜头表、参考图一致性关键帧、视频片段、固定人物声音、音效、字幕、固定剧情时间线、连续性检查和可复现导出连接成一个完整流程。
 
-> 状态：v0.1 核心流程已经实现。真实 OpenAI 媒体调用仍保持手动 opt-in，安装包和创作者示例仍在完善中。
+> 状态：v0.2 alpha 实施阶段。项目、Agent、媒体、配音、连续性、时间线、渲染和导出核心路径已实现；真实 provider 调用仍需手动 opt-in，签名发行尚未达到稳定版本标准。
 
-## 为什么选择 SceneOps
-
-- **Agent 原生工作流：** Codex app-server 提供登录、持久化 thread、turn、流式事件和人工审批。
-- **本地优先项目：** JSON manifests 和媒体文件是唯一持久化真相；SQLite 仅作为可重建索引。
-- **供应商无关资产：** provider 和 model 信息存放在 provenance 中，不进入核心项目 schema。
-- **人工控制成本：** 分镜写入和付费媒体操作每次都必须得到明确审批。
-- **可迁移输出：** 导出的项目保留 prompt、参数、父资产关系、哈希以及 provider request ID。
-
-## v0.1 工作流
+## 核心流程
 
 ```text
-创作简报 -> 分镜 -> 关键帧版本 -> 选择版本 -> 生成或导入视频 -> 导出
+系列设定 → 分集剧本 → 角色/场景圣经 → 专业镜头表 → 一致性关键帧
+→ 视频片段 → 配音与音效 → 固定剧情时间线 → 连续性检查 → 导出
 ```
 
-桌面端流程刻意保持引导式与简洁：
+DramaOps 默认面向竖屏短剧：`9:16`、`1080×1920`、`25fps`，单集约 1–3 分钟；同时支持横屏项目。
 
-1. 选择本地目录，创建或打开项目。
-2. 编写并明确保存 `brief.md`。
-3. 让 Codex Agent 通过 SceneOps MCP 工具生成首个 3 scenes / 6 shots 分镜。
-4. 对分镜写入执行一次性审批。
-5. 生成关键帧版本、附加参考图并选择首选图片。
-6. 导入已完成的视频，或使用通过能力探测的视频 provider。
-7. 导出确定性的 manifests、媒体、runs 与 provenance，并显示导出包 SHA-256。
+- **系列级连续性：** 多集复用人物、Voice Profile、场景、道具、视觉风格、环境底噪、motif 和 BGM。
+- **结构化剧本真相：** 分集 JSON 是唯一真相；Fountain 可导入、可重新生成，但不会成为第二份易漂移数据源。
+- **专业镜头描述：** 明确记录景别、机位、运镜、焦段、构图、对焦、调度、光线、屏幕方向、视线、服装、道具和转场。
+- **参考资产组装：** 关键帧请求自动带上相关视觉风格、人物、场景、道具与镜头参考；视频优先使用已选关键帧。
+- **人物声音锁定：** 每个角色固定一个内置、自定义或外部 Voice Profile；自定义 provider voice ID 与 consent ID 只保存在 macOS Keychain。
+- **聚焦式剪辑：** 一条固定顺序视频轨，加对白、音效、BGM 和字幕 lane，不扩张为通用专业 NLE。
+- **可复现交付：** MP4、SRT、Fountain、manifests、连续性报告、哈希和 provenance 一并导出。
 
-审批会同时出现在当前工作区和 Runs 页面。付费生成与任务取消都不会提供永久允许选项。
+## Codex agent harness
 
-首个版本面向 Apple Silicon Mac。架构会保留 Windows 兼容边界，但 Windows 打包不属于 v0.1 发布门槛。
+Codex Agent 负责结构化剧本、系列圣经和专业镜头表。媒体生成、配音、时间线调整和渲染仍由用户通过明确按钮触发。
+
+DramaOps 通过 JSONL/JSON-RPC 直接连接 `codex app-server`。活动项目关联一个 app-server 进程，项目根目录作为 `cwd`，采用 `workspaceWrite` sandbox 与 `onRequest` approval。应用通过临时命令行配置注入 stdio MCP server，不修改用户的全局 Codex 配置。
+
+公开 MCP 契约固定为八个工具：
+
+```text
+dramaops_project_read       dramaops_script_apply
+dramaops_shotplan_apply     dramaops_image_generate
+dramaops_video_generate     dramaops_speech_generate
+dramaops_job_status         dramaops_job_cancel
+```
+
+Agent 写入剧本或镜头表、付费媒体或自定义声音操作，以及 provider 任务取消都需要新的一次性审批，不提供付费操作永久批准。
+
+## 本地优先项目与渲染
+
+JSON manifests 和媒体字节是持久化真相；`.dramaops/index.sqlite` 只是可丢弃索引，删除后可从 manifests 无损重建。
+
+本地渲染使用 `ffprobe` 验证素材，使用 FFmpeg 完成裁切、规格统一、硬切/淡化/溶解、字幕烧录、对白/音效/BGM 混音、BGM ducking、响度归一化以及 H.264/AAC 输出。默认成片为 1080×1920、25fps、48kHz stereo、`-16 LUFS`、`-1 dBTP`。
+
+OpenAI 是首个图片和语音 provider。存在参考图时，GPT Image 使用多参考图编辑路径。视频生成按能力探测并标记为实验能力；稳定主路径是外部视频导入，因为 [OpenAI Videos API](https://developers.openai.com/api/reference/typescript/resources/videos/methods/create) 已弃用，并计划于 2026 年 9 月 24 日关闭。
 
 ## 架构
 
 ```text
 React + TypeScript UI
-        |
-Wails 生成的 bindings 和事件
-        |
+        │ Wails 生成的 bindings 与 dramaops:* events
 Go 应用服务
-  |              |                 |
-项目存储         Codex app-server  MediaProvider
-(JSON + 媒体)    (JSONL JSON-RPC)  (首个实现为 OpenAI)
-  |              |
-SQLite 索引      SceneOps stdio MCP
+   ├── 项目存储 + 可重建 SQLite 索引
+   ├── Codex app-server + DramaOps stdio MCP
+   ├── Image / Video / Speech 能力型 provider
+   └── FFmpeg 固定时间线渲染引擎
 ```
 
-SceneOps 为每个活动项目启动一个 Codex app-server。它将项目根目录作为 `cwd`，使用 `workspaceWrite` sandbox 和 `on-request` approval policy，并通过命令行配置覆盖注入 SceneOps MCP server。SceneOps 不会修改用户的全局 Codex 配置。
+provider 和 model 名称只进入 provenance 与 adapter，不进入核心 schema。OpenAI 媒体密钥与自定义 voice/consent 绑定分别存入 macOS Keychain 的 `dev.bg-dao.dramaops` service；明文秘密不会进入 Snapshot、manifests、日志、SQLite 或导出包。
 
 ## 开发
 
 前置要求：
 
-- Go 1.25 或更高版本
-- Node.js 20 或更高版本
-- Wails 2.15 或更高版本
+- Go 1.25+
+- Node.js 20+
+- Wails 2.15+
 - 支持 `app-server` 的 Codex CLI
+- 本地 macOS 渲染需要支持 `h264_videotoolbox` 的 FFmpeg
 
 ```bash
-npm --prefix frontend install
+npm --prefix frontend ci
 npm --prefix frontend test
 npm --prefix frontend run build
 go test -race ./...
@@ -73,48 +85,44 @@ wails dev
 直接运行 MCP server：
 
 ```bash
-go run ./cmd/sceneops-mcp --project /absolute/path/to/a/sceneops/project
+go run ./cmd/dramaops-mcp --project /absolute/path/to/a/dramaops/project
 ```
 
-在不修改项目的情况下运行真实 app-server walking-skeleton 技术闸门：
+在不修改项目文件的前提下运行真实 app-server smoke gate：
 
 ```bash
-go run ./cmd/sceneops-harness-smoke \
-  --project /absolute/path/to/a/sceneops/project \
-  --mcp-command /absolute/path/to/SceneOps \
-  --prompt "Reply with exactly: SceneOps harness ready. Do not call tools or modify files."
+go run ./cmd/dramaops-harness-smoke \
+  --project /absolute/path/to/a/dramaops/project \
+  --mcp-command /absolute/path/to/DramaOps \
+  --prompt "Reply with exactly: DramaOps harness ready. Do not call tools or modify files."
 ```
 
-该命令默认使用锁定且经过校验的 runtime。smoke 命令中的预发布兼容参数只用于诊断，桌面应用不会使用这些参数。
-
-OpenAI 媒体生成使用单独的 API key，并由操作系统 Keychain 以 service `dev.bg-dao.sceneops` 保存。该 key 永远不会写入 SceneOps 项目、SQLite 索引、日志或导出包。
-
-视频导入是 v0.1 的稳定主路径。当前 OpenAI Videos adapter 被明确标记为实验能力，因为[官方 API](https://developers.openai.com/api/reference/typescript/resources/videos/methods/create) 已弃用并计划于 2026 年 9 月 24 日关闭。它可以使用已选关键帧作为可选图片输入；未来替换 provider 时，供应商无关的资产关系仍然有效。
+默认测试不会发起真实 OpenAI 调用。
 
 ## 项目目录
 
 ```text
-my-film/
-├── sceneops.project.json
-├── brief.md
-├── AGENTS.md
-├── scenes/
-├── shots/
+my-series/
+├── dramaops.project.json
+├── episodes/<episode-id>/episode.json
+├── episodes/<episode-id>/edit.json
+├── characters/<character-id>.json
+├── locations/<location-id>.json
+├── props/<prop-id>.json
+├── scenes/<scene-id>.json
+├── shots/<shot-id>.json
 ├── assets/<asset-id>/asset.json
 ├── runs/<run-id>.json
+├── renders/
 ├── exports/
-└── .sceneops/index.sqlite
+└── .dramaops/index.sqlite
 ```
 
-具体实现契约请参阅 [docs/architecture.md](docs/architecture.md)、[docs/project-format.md](docs/project-format.md) 和 [docs/security.md](docs/security.md)。
-
-## 与 Axon 的关系
-
-SceneOps 是 Axon 旗下一个自包含的开源项目。它的源码、依赖、CI、版本发布和公开路线图均在本仓库中独立维护。
+详见[示例短剧](examples/README.md)、[架构](docs/architecture.md)、[项目格式](docs/project-format.md)、[安全模型](docs/security.md)和[发布门槛](docs/release.md)。
 
 ## 贡献与安全
 
-开发流程请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告，不要提交公开 issue。
+开发流程请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不要创建公开 issue。
 
 ## 许可证
 

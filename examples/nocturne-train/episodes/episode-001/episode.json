@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "episode-001",
+  "number": 1,
+  "title": "The Last Recording",
+  "logline": "On the final mountain train, a radio engineer hears a message from the partner she thought was lost.",
+  "synopsis": "Lin boards the last train with a damaged recorder. Conductor Chen helps restore playback, revealing that the voice is not a farewell but a set of coordinates pointing beyond the fog.",
+  "status": "planning",
+  "sceneIds": ["scene-01", "scene-02", "scene-03"],
+  "scriptBlocks": [
+    {"id":"block-01","sceneId":"scene-01","kind":"action","order":0,"text":"Rain needles the empty platform as Lin arrives clutching a battered recorder."},
+    {"id":"block-02","sceneId":"scene-01","kind":"dialogue","order":1,"characterId":"character-chen","text":"Last train. If you're coming, come now.","emotion":"guarded"},
+    {"id":"block-03","sceneId":"scene-01","kind":"sfx","order":2,"text":"The recorder clicks and plays one breath of static."},
+    {"id":"block-04","sceneId":"scene-02","kind":"action","order":0,"text":"Inside the swaying carriage, Chen reseats the loose battery contact."},
+    {"id":"block-05","sceneId":"scene-02","kind":"dialogue","order":1,"characterId":"character-lin","text":"That voice disappeared three years ago.","emotion":"contained fear"},
+    {"id":"block-06","sceneId":"scene-02","kind":"voice_over","order":2,"characterId":"character-lin","text":"Don't stop at the tunnel. Look above the fog.","emotion":"recorded, intimate"},
+    {"id":"block-07","sceneId":"scene-02","kind":"music","order":3,"text":"A restrained three-note piano motif enters beneath the rail rhythm."},
+    {"id":"block-08","sceneId":"scene-03","kind":"action","order":0,"text":"The train climbs into dawn and a transmitter tower appears above the cloud line."},
+    {"id":"block-09","sceneId":"scene-03","kind":"dialogue","order":1,"characterId":"character-chen","text":"That station has been dark for years.","emotion":"quiet disbelief"},
+    {"id":"block-10","sceneId":"scene-03","kind":"dialogue","order":2,"characterId":"character-lin","text":"Then someone just turned it on.","emotion":"hope breaking through"}
+  ],
+  "createdAt": "2026-08-23T00:00:00Z",
+  "updatedAt": "2026-08-23T00:00:00Z"
+}

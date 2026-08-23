@@ -1,11 +1,12 @@
-# Two-minute demo script
+# Two-minute DramaOps demo
 
-1. Open the `nocturne-train` example and show its ordinary JSON manifests.
-2. Connect the Codex app-server account and ask: “Refine this brief into three scenes and six shots.”
-3. Show the storyboard approval and approve once.
-4. Select `Platform reveal`, generate two keyframe versions, and select one.
-5. Generate a four-second landscape video; show the run polling and provider capability state.
-6. Open provenance, compare the provider request ID and SHA-256, then export the project.
-7. Delete the SQLite index, rebuild it, and show that the storyboard and assets remain intact.
-
-Use a test API project with a spend limit. Do not record credentials, account identifiers, or private creator media.
+1. Open the included portrait series and show the episode logline, two characters, Voice Profiles, locations, prop, Style Bible, and Sound Palette.
+2. Ask the Codex Agent to create a structured episode script; approve the write once.
+3. Ask for an eight-shot professional plan; inspect shot size, angle, movement, lens, screen direction, wardrobe, and prop continuity; approve once.
+4. Select one shot, show automatically assembled character/location/prop references, generate two keyframe versions, and choose one.
+5. Import or generate video clips. Show that each selected video traces back to its keyframe and that the next shot can use continuity inputs supported by the provider.
+6. Generate dialogue with each character's locked Voice Profile, then add reusable ambience and BGM.
+7. Build the fixed video/dialogue/SFX/BGM/subtitle timeline, run continuity checks, and resolve one visible warning.
+8. Render the portrait MP4 and locate the SRT. Show 1080×1920, 25fps, H.264/AAC, and render provenance.
+9. Delete `.dramaops/index.sqlite`, rebuild it, and show that the story, shots, assets, timeline, and render remain intact.
+10. Export the `.dramaops.zip` and show Fountain, SRT, MP4, continuity report, provenance, file count, and package SHA-256.

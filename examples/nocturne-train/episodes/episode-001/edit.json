@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "episodeId": "episode-001",
+  "videoTrack": [],
+  "audioCues": [],
+  "subtitleCues": [],
+  "output": {
+    "orientation": "portrait",
+    "width": 1080,
+    "height": 1920,
+    "fps": 25,
+    "videoCodec": "h264",
+    "audioCodec": "aac",
+    "audioSampleRate": 48000,
+    "audioChannels": 2,
+    "loudnessLufs": -16,
+    "truePeakDbtp": -1,
+    "burnSubtitles": true,
+    "subtitleSafeArea": 0.12
+  },
+  "updatedAt": "2026-08-23T00:00:00Z"
+}

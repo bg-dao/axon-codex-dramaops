@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bg-dao/axon-codex-sceneops/internal/project"
+	"github.com/bg-dao/axon-codex-dramaops/internal/project"
 )
 
 func TestFileGateRequiresFreshDecision(t *testing.T) {
