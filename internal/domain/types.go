@@ -96,6 +96,7 @@ type Run struct {
 
 type Snapshot struct {
 	Root    string  `json:"root"`
+	Brief   string  `json:"brief"`
 	Project Project `json:"project"`
 	Scenes  []Scene `json:"scenes"`
 	Shots   []Shot  `json:"shots"`

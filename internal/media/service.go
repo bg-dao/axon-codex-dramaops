@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bg-dao/axon-codex-sceneops/internal/approval"
@@ -75,14 +76,23 @@ func (s *Service) GenerateVideo(ctx context.Context, shotID string, request prov
 	if !capabilities.VideoGeneration {
 		return Result{}, fmt.Errorf("video generation is unavailable: %s", capabilities.Reason)
 	}
+	if capabilities.VideoReferences {
+		request, err = s.resolveVideoReference(shotID, request)
+		if err != nil {
+			return Result{}, err
+		}
+	} else {
+		request.ReferenceAssetID = ""
+		request.ReferencePath = ""
+	}
 	request = normalizeVideoRequest(request)
 	run, err := s.newRun("video_generate", shotID, map[string]any{
-		"prompt": request.Prompt, "model": request.Model, "parameters": request.Parameters,
+		"prompt": request.Prompt, "model": request.Model, "parameters": request.Parameters, "referenceAssetId": request.ReferenceAssetID,
 	})
 	if err != nil {
 		return Result{}, err
 	}
-	if _, err := s.Approval.Request(ctx, approval.VideoGenerate, "Generate a paid video asset", map[string]any{"runId": run.ID, "shotId": shotID, "prompt": request.Prompt, "seconds": request.Seconds, "size": request.Size}); err != nil {
+	if _, err := s.Approval.Request(ctx, approval.VideoGenerate, "Generate a paid video asset", map[string]any{"runId": run.ID, "shotId": shotID, "prompt": request.Prompt, "seconds": request.Seconds, "size": request.Size, "referenceAssetId": request.ReferenceAssetID}); err != nil {
 		return Result{Run: s.failOrCancel(run, domain.RunCancelled, err)}, err
 	}
 	run, err = s.Store.TransitionRun(s.Root, run.ID, domain.RunRunning, "")
@@ -187,6 +197,49 @@ func cloneParameters(input map[string]any) map[string]any {
 	return output
 }
 
+func (s *Service) resolveVideoReference(shotID string, request provider.VideoRequest) (provider.VideoRequest, error) {
+	snapshot, err := s.Store.Open(s.Root)
+	if err != nil {
+		return request, err
+	}
+	shotFound := false
+	for _, shot := range snapshot.Shots {
+		if shot.ID != shotID {
+			continue
+		}
+		shotFound = true
+		if request.ReferenceAssetID == "" {
+			request.ReferenceAssetID = shot.SelectedAssetID
+		}
+		break
+	}
+	if !shotFound {
+		return request, fmt.Errorf("shot %s not found", shotID)
+	}
+	if request.ReferenceAssetID == "" {
+		return request, nil
+	}
+	for _, asset := range snapshot.Assets {
+		if asset.ID != request.ReferenceAssetID || asset.ShotID != shotID || (asset.Kind != domain.AssetKindImage && asset.Kind != domain.AssetKindReference) {
+			continue
+		}
+		path, err := project.ResolveRelative(s.Root, asset.RelativePath)
+		if err != nil {
+			return request, err
+		}
+		hash, err := project.HashFile(path)
+		if err != nil {
+			return request, err
+		}
+		if !strings.EqualFold(hash, asset.SHA256) {
+			return request, fmt.Errorf("reference asset %s failed SHA-256 verification", asset.ID)
+		}
+		request.ReferencePath = path
+		return request, nil
+	}
+	return request, fmt.Errorf("reference asset %s is not a visual asset of shot %s", request.ReferenceAssetID, shotID)
+}
+
 func (s *Service) CancelRun(ctx context.Context, runID string) (Result, error) {
 	run, err := s.findRun(runID)
 	if err != nil {
@@ -266,8 +319,25 @@ func (s *Service) persistResult(ctx context.Context, run domain.Run, job provide
 		},
 		CreatedAt: time.Now().UTC(),
 	}
+	if parentAssetID, _ := run.Metadata["referenceAssetId"].(string); parentAssetID != "" {
+		asset.ParentAssetID = parentAssetID
+	}
 	if err := s.Store.SaveAsset(s.Root, asset); err != nil {
 		return domain.Asset{}, err
+	}
+	if kind == domain.AssetKindImage {
+		snapshot, openErr := s.Store.Open(s.Root)
+		if openErr != nil {
+			return domain.Asset{}, openErr
+		}
+		for _, shot := range snapshot.Shots {
+			if shot.ID == run.ShotID && shot.SelectedAssetID == "" {
+				if _, selectErr := s.Store.SelectImageVersion(s.Root, shot.ID, asset.ID); selectErr != nil {
+					return domain.Asset{}, selectErr
+				}
+				break
+			}
+		}
 	}
 	if err := project.RebuildIndex(s.Root); err != nil {
 		return domain.Asset{}, err

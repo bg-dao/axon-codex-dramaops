@@ -19,6 +19,8 @@ import (
 
 const ProjectManifest = "sceneops.project.json"
 
+const MaxBriefBytes = 1 << 20
+
 type Store struct {
 	now func() time.Time
 }
@@ -32,6 +34,12 @@ func (s *Store) Create(root, name string) (domain.Snapshot, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return domain.Snapshot{}, fmt.Errorf("resolve root: %w", err)
+	}
+	manifestPath := filepath.Join(absRoot, ProjectManifest)
+	if _, err := os.Lstat(manifestPath); err == nil {
+		return domain.Snapshot{}, fmt.Errorf("a SceneOps project already exists at %s", absRoot)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return domain.Snapshot{}, fmt.Errorf("inspect project manifest: %w", err)
 	}
 	if err := os.MkdirAll(absRoot, 0o755); err != nil {
 		return domain.Snapshot{}, fmt.Errorf("create project root: %w", err)
@@ -56,7 +64,7 @@ func (s *Store) Create(root, name string) (domain.Snapshot, error) {
 	if err := s.SaveProject(absRoot, manifest); err != nil {
 		return domain.Snapshot{}, err
 	}
-	if err := writeIfMissing(filepath.Join(absRoot, "brief.md"), "# Creative brief\n\nDescribe the story, audience, visual language, and delivery constraints.\n"); err != nil {
+	if err := writeIfMissing(filepath.Join(absRoot, "brief.md"), "# Creative brief\n\n"); err != nil {
 		return domain.Snapshot{}, err
 	}
 	if err := writeIfMissing(filepath.Join(absRoot, "AGENTS.md"), projectAgentInstructions()); err != nil {
@@ -92,6 +100,18 @@ func (s *Store) Open(root string) (domain.Snapshot, error) {
 		Assets:  []domain.Asset{},
 		Runs:    []domain.Run{},
 	}
+	briefPath, err := ResolveRelative(absRoot, "brief.md")
+	if err != nil {
+		return domain.Snapshot{}, err
+	}
+	brief, err := os.ReadFile(briefPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return domain.Snapshot{}, fmt.Errorf("read creative brief: %w", err)
+	}
+	if len(brief) > MaxBriefBytes {
+		return domain.Snapshot{}, fmt.Errorf("creative brief exceeds %d bytes", MaxBriefBytes)
+	}
+	snapshot.Brief = string(brief)
 	if err := loadJSONGlob(filepath.Join(absRoot, "scenes", "*.json"), &snapshot.Scenes); err != nil {
 		return domain.Snapshot{}, err
 	}
@@ -129,6 +149,17 @@ func (s *Store) SaveProject(root string, value domain.Project) error {
 		return err
 	}
 	return AtomicWriteJSON(path, value)
+}
+
+func (s *Store) SaveBrief(root, markdown string) error {
+	if len(markdown) > MaxBriefBytes {
+		return fmt.Errorf("creative brief exceeds %d bytes", MaxBriefBytes)
+	}
+	path, err := ResolveRelative(root, "brief.md")
+	if err != nil {
+		return err
+	}
+	return AtomicWrite(path, []byte(markdown), 0o644)
 }
 
 func (s *Store) SaveScene(root string, value domain.Scene) error {
@@ -199,6 +230,72 @@ func (s *Store) SaveAsset(root string, value domain.Asset) error {
 	return AtomicWriteJSON(path, value)
 }
 
+func (s *Store) SelectImageVersion(root, shotID, assetID string) (domain.Shot, error) {
+	if err := ValidateID(shotID); err != nil {
+		return domain.Shot{}, err
+	}
+	if err := ValidateID(assetID); err != nil {
+		return domain.Shot{}, err
+	}
+	snapshot, err := s.Open(root)
+	if err != nil {
+		return domain.Shot{}, err
+	}
+	validAsset := false
+	for _, asset := range snapshot.Assets {
+		if asset.ID == assetID && asset.ShotID == shotID && asset.Kind == domain.AssetKindImage {
+			validAsset = true
+			break
+		}
+	}
+	if !validAsset {
+		return domain.Shot{}, fmt.Errorf("asset %s is not an image version of shot %s", assetID, shotID)
+	}
+	for _, shot := range snapshot.Shots {
+		if shot.ID == shotID {
+			shot.SelectedAssetID = assetID
+			if err := s.SaveShot(root, shot); err != nil {
+				return domain.Shot{}, err
+			}
+			return shot, nil
+		}
+	}
+	return domain.Shot{}, fmt.Errorf("shot %s not found", shotID)
+}
+
+func (s *Store) AddReferenceAsset(root, shotID, assetID string) (domain.Shot, error) {
+	snapshot, err := s.Open(root)
+	if err != nil {
+		return domain.Shot{}, err
+	}
+	validAsset := false
+	for _, asset := range snapshot.Assets {
+		if asset.ID == assetID && asset.ShotID == shotID && asset.Kind == domain.AssetKindReference {
+			validAsset = true
+			break
+		}
+	}
+	if !validAsset {
+		return domain.Shot{}, fmt.Errorf("asset %s is not a reference for shot %s", assetID, shotID)
+	}
+	for _, shot := range snapshot.Shots {
+		if shot.ID != shotID {
+			continue
+		}
+		for _, existing := range shot.ReferenceAssets {
+			if existing == assetID {
+				return shot, nil
+			}
+		}
+		shot.ReferenceAssets = append(shot.ReferenceAssets, assetID)
+		if err := s.SaveShot(root, shot); err != nil {
+			return domain.Shot{}, err
+		}
+		return shot, nil
+	}
+	return domain.Shot{}, fmt.Errorf("shot %s not found", shotID)
+}
+
 func (s *Store) SaveRun(root string, value domain.Run) error {
 	if err := ValidateID(value.ID); err != nil {
 		return err
@@ -244,6 +341,16 @@ func (s *Store) TransitionRun(root, runID string, next domain.RunStatus, message
 }
 
 func (s *Store) ApplyStoryboard(root string, scenes []domain.Scene, shots []domain.Shot) (domain.Snapshot, error) {
+	existing, err := s.Open(root)
+	if err != nil {
+		return domain.Snapshot{}, err
+	}
+	if len(existing.Scenes) > 0 || len(existing.Shots) > 0 {
+		return domain.Snapshot{}, errors.New("storyboard already exists; edit existing scenes and shots instead")
+	}
+	if len(scenes) == 0 || len(shots) == 0 {
+		return domain.Snapshot{}, errors.New("storyboard requires at least one scene and one shot")
+	}
 	now := s.now()
 	sceneIDs := make(map[string]struct{}, len(scenes))
 	for i := range scenes {
@@ -256,8 +363,16 @@ func (s *Store) ApplyStoryboard(root string, scenes []domain.Scene, shots []doma
 		if scenes[i].CreatedAt.IsZero() {
 			scenes[i].CreatedAt = now
 		}
+		if err := ValidateID(scenes[i].ID); err != nil {
+			return domain.Snapshot{}, fmt.Errorf("scene id: %w", err)
+		}
+		if _, duplicate := sceneIDs[scenes[i].ID]; duplicate {
+			return domain.Snapshot{}, fmt.Errorf("duplicate scene id %q", scenes[i].ID)
+		}
 		sceneIDs[scenes[i].ID] = struct{}{}
 	}
+	shotIDs := make(map[string]struct{}, len(shots))
+	shotOrder := make(map[string]int, len(scenes))
 	for i := range shots {
 		if shots[i].ID == "" {
 			shots[i].ID = uuid.NewString()
@@ -265,7 +380,22 @@ func (s *Store) ApplyStoryboard(root string, scenes []domain.Scene, shots []doma
 		if _, ok := sceneIDs[shots[i].SceneID]; !ok {
 			return domain.Snapshot{}, fmt.Errorf("shot %q references unknown scene %q", shots[i].ID, shots[i].SceneID)
 		}
+		if err := ValidateID(shots[i].ID); err != nil {
+			return domain.Snapshot{}, fmt.Errorf("shot id: %w", err)
+		}
+		if _, duplicate := shotIDs[shots[i].ID]; duplicate {
+			return domain.Snapshot{}, fmt.Errorf("duplicate shot id %q", shots[i].ID)
+		}
+		shotIDs[shots[i].ID] = struct{}{}
 		shots[i].SchemaVersion = domain.SchemaVersion
+		shots[i].Order = shotOrder[shots[i].SceneID]
+		shotOrder[shots[i].SceneID]++
+		if shots[i].DurationSeconds == 0 {
+			shots[i].DurationSeconds = 4
+		}
+		if shots[i].AspectRatio == "" {
+			shots[i].AspectRatio = "16:9"
+		}
 		if shots[i].CreatedAt.IsZero() {
 			shots[i].CreatedAt = now
 		}
@@ -293,12 +423,47 @@ func (s *Store) ApplyStoryboard(root string, scenes []domain.Scene, shots []doma
 }
 
 func (s *Store) ImportAsset(root, source, shotID string, kind domain.AssetKind) (domain.Asset, error) {
+	return s.ImportAssetWithParent(root, source, shotID, kind, "")
+}
+
+func (s *Store) ImportAssetWithParent(root, source, shotID string, kind domain.AssetKind, parentAssetID string) (domain.Asset, error) {
 	if kind != domain.AssetKindImage && kind != domain.AssetKindVideo && kind != domain.AssetKindReference {
 		return domain.Asset{}, fmt.Errorf("unsupported asset kind %q", kind)
 	}
+	var snapshot domain.Snapshot
 	if shotID != "" {
 		if err := ValidateID(shotID); err != nil {
 			return domain.Asset{}, err
+		}
+		var err error
+		snapshot, err = s.Open(root)
+		if err != nil {
+			return domain.Asset{}, err
+		}
+		shotFound := false
+		for _, shot := range snapshot.Shots {
+			if shot.ID == shotID {
+				shotFound = true
+				break
+			}
+		}
+		if !shotFound {
+			return domain.Asset{}, fmt.Errorf("shot %s not found", shotID)
+		}
+	}
+	if parentAssetID != "" {
+		if err := ValidateID(parentAssetID); err != nil {
+			return domain.Asset{}, fmt.Errorf("parent asset id: %w", err)
+		}
+		parentFound := false
+		for _, asset := range snapshot.Assets {
+			if asset.ID == parentAssetID && asset.ShotID == shotID && (asset.Kind == domain.AssetKindImage || asset.Kind == domain.AssetKindReference) {
+				parentFound = true
+				break
+			}
+		}
+		if !parentFound {
+			return domain.Asset{}, fmt.Errorf("parent asset %s is not a visual asset of shot %s", parentAssetID, shotID)
 		}
 	}
 	input, err := os.Open(source)
@@ -350,6 +515,7 @@ func (s *Store) ImportAsset(root, source, shotID string, kind domain.AssetKind) 
 		Kind:          kind,
 		RelativePath:  filepath.ToSlash(rel),
 		SHA256:        hex.EncodeToString(hash.Sum(nil)),
+		ParentAssetID: parentAssetID,
 		Provenance: domain.Provenance{
 			Provider:    "external-import",
 			GeneratedAt: s.now(),
@@ -358,6 +524,11 @@ func (s *Store) ImportAsset(root, source, shotID string, kind domain.AssetKind) 
 	}
 	if err := s.SaveAsset(root, asset); err != nil {
 		return domain.Asset{}, err
+	}
+	if kind == domain.AssetKindReference && shotID != "" {
+		if _, err := s.AddReferenceAsset(root, shotID, asset.ID); err != nil {
+			return domain.Asset{}, err
+		}
 	}
 	if err := RebuildIndex(root); err != nil {
 		return domain.Asset{}, err

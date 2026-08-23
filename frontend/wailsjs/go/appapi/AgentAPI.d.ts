@@ -4,6 +4,8 @@ import {appserver} from '../models';
 
 export function Account():Promise<Record<string, any>>;
 
+export function GenerateStoryboard():Promise<appserver.Turn>;
+
 export function InterruptTurn(arg1:string,arg2:string):Promise<void>;
 
 export function ResolveApproval(arg1:string,arg2:string):Promise<void>;

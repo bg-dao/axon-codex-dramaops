@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 SceneOps is a local-first desktop workbench for independent creators. It turns a brief into a structured storyboard, keyframes, video shots, version decisions, and an exportable asset/provenance package while keeping project files understandable and portable.
 
-> Status: early v0.1 implementation. The project format, local persistence, Codex app-server bridge, SceneOps MCP tools, OpenAI media adapter, and desktop workbench are under active development.
+> Status: v0.1 core workflow implemented. Real OpenAI media calls remain manual opt-in while packaging and creator examples are still in progress.
 
 ## Why SceneOps
 
@@ -19,8 +19,20 @@ SceneOps is a local-first desktop workbench for independent creators. It turns a
 ## v0.1 workflow
 
 ```text
-Brief -> Storyboard -> Keyframes -> Video shots -> Version selection -> Export
+Brief -> Storyboard -> Keyframe versions -> Select -> Generate or import video -> Export
 ```
+
+The desktop workflow is intentionally guided and small:
+
+1. Choose a local folder and create or open a project.
+2. Write and explicitly save `brief.md`.
+3. Ask the Codex agent to create the initial 3-scene / 6-shot storyboard through the SceneOps MCP tools.
+4. Approve the storyboard write once.
+5. Generate keyframe versions, attach reference images, and select the preferred image.
+6. Import a finished video or use a capability-gated video provider.
+7. Export deterministic manifests, media, runs, and provenance with a package SHA-256.
+
+Approvals appear in the active workspace as well as the Runs page. Paid generation and cancellation never have a permanent allow option.
 
 The first release targets macOS on Apple Silicon. Windows-compatible boundaries are retained, but Windows packaging is not a v0.1 release gate.
 
@@ -76,6 +88,8 @@ go run ./cmd/sceneops-harness-smoke \
 This uses the pinned verified runtime by default. The smoke command's prerelease compatibility flags are diagnostic-only and are not used by the desktop application.
 
 OpenAI media generation uses a separate API key stored by the operating system keychain under service `dev.bg-dao.sceneops`. The key is never written to a SceneOps project, SQLite index, log, or export.
+
+Video import is the stable v0.1 path. The current OpenAI Videos adapter is marked experimental because the [official API](https://developers.openai.com/api/reference/typescript/resources/videos/methods/create) is deprecated and scheduled to shut down on September 24, 2026. Its optional image input uses the selected keyframe, while provider-neutral asset lineage remains valid when another adapter replaces it.
 
 ## Project layout
 

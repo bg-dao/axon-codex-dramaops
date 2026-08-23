@@ -21,6 +21,9 @@ func TestProjectRoundTripAndIndexRebuild(t *testing.T) {
 	if snapshot.Project.SchemaVersion != 1 {
 		t.Fatalf("schemaVersion = %d", snapshot.Project.SchemaVersion)
 	}
+	if err := store.SaveBrief(root, "# Creative brief\n\nA quiet arrival at sunrise.\n"); err != nil {
+		t.Fatal(err)
+	}
 	scenes := []domain.Scene{{ID: "scene-1", Title: "Arrival"}, {ID: "scene-2", Title: "Departure"}}
 	shots := []domain.Shot{
 		{ID: "shot-1", SceneID: "scene-1", Title: "Wide arrival", Order: 0, DurationSeconds: 4},
@@ -33,6 +36,15 @@ func TestProjectRoundTripAndIndexRebuild(t *testing.T) {
 	}
 	if len(snapshot.Scenes) != 2 || len(snapshot.Shots) != 3 {
 		t.Fatalf("unexpected storyboard size: %d scenes, %d shots", len(snapshot.Scenes), len(snapshot.Shots))
+	}
+	if snapshot.Brief != "# Creative brief\n\nA quiet arrival at sunrise.\n" {
+		t.Fatalf("brief = %q", snapshot.Brief)
+	}
+	if snapshot.Shots[0].AspectRatio != "16:9" || snapshot.Shots[0].DurationSeconds != 4 {
+		t.Fatalf("shot defaults were not normalized: %+v", snapshot.Shots[0])
+	}
+	if _, err := store.ApplyStoryboard(root, scenes, shots); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected existing storyboard to fail closed, got %v", err)
 	}
 	indexPath, _ := IndexPath(root)
 	if err := os.Remove(indexPath); err != nil {
@@ -98,5 +110,21 @@ func TestUnsupportedSchemaFailsClosed(t *testing.T) {
 	_, err := NewStore().Open(root)
 	if err == nil || !strings.Contains(err.Error(), "unsupported schemaVersion") {
 		t.Fatalf("expected unsupported schema error, got %v", err)
+	}
+}
+
+func TestCreateDoesNotOverwriteExistingProject(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "existing")
+	store := NewStore()
+	first, err := store.Create(root, "First")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(root, "Second"); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected duplicate create to fail, got %v", err)
+	}
+	opened, err := store.Open(root)
+	if err != nil || opened.Project.ID != first.Project.ID || opened.Project.Name != "First" {
+		t.Fatalf("existing project was changed: %+v, err = %v", opened.Project, err)
 	}
 }

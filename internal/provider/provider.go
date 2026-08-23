@@ -7,11 +7,14 @@ import (
 )
 
 type Capabilities struct {
-	ImageGeneration bool     `json:"imageGeneration"`
-	VideoGeneration bool     `json:"videoGeneration"`
-	ImageModels     []string `json:"imageModels"`
-	VideoModels     []string `json:"videoModels"`
-	Reason          string   `json:"reason,omitempty"`
+	ImageGeneration   bool     `json:"imageGeneration"`
+	VideoGeneration   bool     `json:"videoGeneration"`
+	VideoReferences   bool     `json:"videoReferences"`
+	VideoExperimental bool     `json:"videoExperimental"`
+	ImageModels       []string `json:"imageModels"`
+	VideoModels       []string `json:"videoModels"`
+	Reason            string   `json:"reason,omitempty"`
+	VideoNotice       string   `json:"videoNotice,omitempty"`
 }
 
 type JobStatus string
@@ -45,12 +48,13 @@ type ImageRequest struct {
 }
 
 type VideoRequest struct {
-	Prompt        string         `json:"prompt"`
-	Model         string         `json:"model,omitempty"`
-	Seconds       int            `json:"seconds,omitempty"`
-	Size          string         `json:"size,omitempty"`
-	ReferencePath string         `json:"referencePath,omitempty"`
-	Parameters    map[string]any `json:"parameters,omitempty"`
+	Prompt           string         `json:"prompt"`
+	Model            string         `json:"model,omitempty"`
+	Seconds          int            `json:"seconds,omitempty"`
+	Size             string         `json:"size,omitempty"`
+	ReferenceAssetID string         `json:"referenceAssetId,omitempty"`
+	ReferencePath    string         `json:"-"`
+	Parameters       map[string]any `json:"parameters,omitempty"`
 }
 
 type MediaProvider interface {

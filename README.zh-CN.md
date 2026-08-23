@@ -6,7 +6,7 @@
 
 SceneOps 是一款面向独立创作者的本地优先桌面工作台。它将创作简报转化为结构化分镜、关键帧、视频镜头、版本决策以及可导出的资产与溯源包，同时确保项目文件清晰易懂且便于迁移。
 
-> 状态：v0.1 早期实现。项目格式、本地持久化、Codex app-server 桥接、SceneOps MCP 工具、OpenAI 媒体适配器和桌面工作台仍在持续开发中。
+> 状态：v0.1 核心流程已经实现。真实 OpenAI 媒体调用仍保持手动 opt-in，安装包和创作者示例仍在完善中。
 
 ## 为什么选择 SceneOps
 
@@ -19,8 +19,20 @@ SceneOps 是一款面向独立创作者的本地优先桌面工作台。它将�
 ## v0.1 工作流
 
 ```text
-创作简报 -> 分镜 -> 关键帧 -> 视频镜头 -> 版本选择 -> 导出
+创作简报 -> 分镜 -> 关键帧版本 -> 选择版本 -> 生成或导入视频 -> 导出
 ```
+
+桌面端流程刻意保持引导式与简洁：
+
+1. 选择本地目录，创建或打开项目。
+2. 编写并明确保存 `brief.md`。
+3. 让 Codex Agent 通过 SceneOps MCP 工具生成首个 3 scenes / 6 shots 分镜。
+4. 对分镜写入执行一次性审批。
+5. 生成关键帧版本、附加参考图并选择首选图片。
+6. 导入已完成的视频，或使用通过能力探测的视频 provider。
+7. 导出确定性的 manifests、媒体、runs 与 provenance，并显示导出包 SHA-256。
+
+审批会同时出现在当前工作区和 Runs 页面。付费生成与任务取消都不会提供永久允许选项。
 
 首个版本面向 Apple Silicon Mac。架构会保留 Windows 兼容边界，但 Windows 打包不属于 v0.1 发布门槛。
 
@@ -76,6 +88,8 @@ go run ./cmd/sceneops-harness-smoke \
 该命令默认使用锁定且经过校验的 runtime。smoke 命令中的预发布兼容参数只用于诊断，桌面应用不会使用这些参数。
 
 OpenAI 媒体生成使用单独的 API key，并由操作系统 Keychain 以 service `dev.bg-dao.sceneops` 保存。该 key 永远不会写入 SceneOps 项目、SQLite 索引、日志或导出包。
+
+视频导入是 v0.1 的稳定主路径。当前 OpenAI Videos adapter 被明确标记为实验能力，因为[官方 API](https://developers.openai.com/api/reference/typescript/resources/videos/methods/create) 已弃用并计划于 2026 年 9 月 24 日关闭。它可以使用已选关键帧作为可选图片输入；未来替换 provider 时，供应商无关的资产关系仍然有效。
 
 ## 项目目录
 

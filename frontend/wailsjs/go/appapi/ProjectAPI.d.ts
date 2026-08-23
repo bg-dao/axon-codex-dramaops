@@ -5,6 +5,8 @@ import {exporter} from '../models';
 
 export function ApplyStoryboard(arg1:Array<domain.Scene>,arg2:Array<domain.Shot>,arg3:boolean):Promise<domain.Snapshot>;
 
+export function ChooseDirectory(arg1:string):Promise<string>;
+
 export function Create(arg1:string,arg2:string):Promise<domain.Snapshot>;
 
 export function Current():Promise<domain.Snapshot>;
@@ -14,6 +16,8 @@ export function Export():Promise<exporter.Result>;
 export function Open(arg1:string):Promise<domain.Snapshot>;
 
 export function RebuildIndex():Promise<void>;
+
+export function SaveBrief(arg1:string):Promise<domain.Snapshot>;
 
 export function SaveScene(arg1:domain.Scene):Promise<domain.Snapshot>;
 

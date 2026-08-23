@@ -7,6 +7,8 @@ import {approval} from '../models';
 
 export function CancelRun(arg1:string):Promise<media.Result>;
 
+export function Capabilities():Promise<provider.Capabilities>;
+
 export function DataURL(arg1:string):Promise<string>;
 
 export function GenerateImage(arg1:string,arg2:provider.ImageRequest):Promise<media.Result>;

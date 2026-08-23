@@ -37,17 +37,30 @@ func (h *Handler) Tools() []Tool {
 		}
 		return schema
 	}
+	storyScene := object(map[string]any{
+		"id":      map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"},
+		"title":   map[string]any{"type": "string", "minLength": 1},
+		"summary": map[string]any{"type": "string"},
+	}, "id", "title")
+	storyShot := object(map[string]any{
+		"id":              map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"},
+		"sceneId":         map[string]any{"type": "string"},
+		"title":           map[string]any{"type": "string", "minLength": 1},
+		"prompt":          map[string]any{"type": "string", "minLength": 1},
+		"durationSeconds": map[string]any{"type": "integer", "enum": []int{4, 8, 12}},
+		"aspectRatio":     map[string]any{"type": "string", "enum": []string{"16:9", "9:16", "1:1"}},
+	}, "id", "sceneId", "title", "prompt")
 	return []Tool{
 		{Name: ToolProjectRead, Description: "Read the current SceneOps project, storyboard, assets, and runs.", InputSchema: object(map[string]any{})},
 		{Name: ToolStoryboardApply, Description: "Apply a structured storyboard after explicit user approval.", InputSchema: object(map[string]any{
-			"scenes": map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
-			"shots":  map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+			"scenes": map[string]any{"type": "array", "minItems": 1, "items": storyScene},
+			"shots":  map[string]any{"type": "array", "minItems": 1, "items": storyShot},
 		}, "scenes", "shots")},
 		{Name: ToolImageGenerate, Description: "Generate and persist a paid keyframe image after explicit user approval.", InputSchema: object(map[string]any{
 			"shotId": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "model": map[string]any{"type": "string"}, "size": map[string]any{"type": "string"}, "quality": map[string]any{"type": "string"},
 		}, "shotId", "prompt")},
 		{Name: ToolVideoGenerate, Description: "Generate a paid video shot after explicit user approval when the provider reports video capability.", InputSchema: object(map[string]any{
-			"shotId": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "model": map[string]any{"type": "string"}, "seconds": map[string]any{"type": "integer", "enum": []int{4, 8, 12}}, "size": map[string]any{"type": "string"},
+			"shotId": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string"}, "model": map[string]any{"type": "string"}, "seconds": map[string]any{"type": "integer", "enum": []int{4, 8, 12}}, "size": map[string]any{"type": "string"}, "referenceAssetId": map[string]any{"type": "string"},
 		}, "shotId", "prompt")},
 		{Name: ToolJobStatus, Description: "Read and refresh a SceneOps media run.", InputSchema: object(map[string]any{"runId": map[string]any{"type": "string"}}, "runId")},
 		{Name: ToolJobCancel, Description: "Cancel a media run after explicit user approval.", InputSchema: object(map[string]any{"runId": map[string]any{"type": "string"}}, "runId")},
@@ -84,16 +97,17 @@ func (h *Handler) Call(ctx context.Context, name string, arguments json.RawMessa
 		return h.Media.GenerateImage(ctx, input.ShotID, provider.ImageRequest{Prompt: input.Prompt, Model: input.Model, Size: input.Size, Quality: input.Quality})
 	case ToolVideoGenerate:
 		var input struct {
-			ShotID  string `json:"shotId"`
-			Prompt  string `json:"prompt"`
-			Model   string `json:"model"`
-			Seconds int    `json:"seconds"`
-			Size    string `json:"size"`
+			ShotID           string `json:"shotId"`
+			Prompt           string `json:"prompt"`
+			Model            string `json:"model"`
+			Seconds          int    `json:"seconds"`
+			Size             string `json:"size"`
+			ReferenceAssetID string `json:"referenceAssetId"`
 		}
 		if err := decodeArguments(arguments, &input); err != nil {
 			return nil, err
 		}
-		return h.Media.GenerateVideo(ctx, input.ShotID, provider.VideoRequest{Prompt: input.Prompt, Model: input.Model, Seconds: input.Seconds, Size: input.Size})
+		return h.Media.GenerateVideo(ctx, input.ShotID, provider.VideoRequest{Prompt: input.Prompt, Model: input.Model, Seconds: input.Seconds, Size: input.Size, ReferenceAssetID: input.ReferenceAssetID})
 	case ToolJobStatus:
 		var input struct {
 			RunID string `json:"runId"`

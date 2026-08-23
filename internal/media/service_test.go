@@ -21,6 +21,7 @@ type fakeProvider struct {
 	jobs         map[string]provider.Job
 	data         map[string]string
 	videoEnabled bool
+	lastVideo    provider.VideoRequest
 }
 
 func newFakeProvider() *fakeProvider {
@@ -29,7 +30,7 @@ func newFakeProvider() *fakeProvider {
 
 func (f *fakeProvider) Name() string { return "fake" }
 func (f *fakeProvider) Capabilities(context.Context) (provider.Capabilities, error) {
-	return provider.Capabilities{ImageGeneration: true, VideoGeneration: f.videoEnabled}, nil
+	return provider.Capabilities{ImageGeneration: true, VideoGeneration: f.videoEnabled, VideoReferences: f.videoEnabled}, nil
 }
 func (f *fakeProvider) GenerateImage(context.Context, provider.ImageRequest) (provider.Job, error) {
 	f.mu.Lock()
@@ -39,9 +40,10 @@ func (f *fakeProvider) GenerateImage(context.Context, provider.ImageRequest) (pr
 	f.data[job.ID] = "image-bytes"
 	return job, nil
 }
-func (f *fakeProvider) GenerateVideo(context.Context, provider.VideoRequest) (provider.Job, error) {
+func (f *fakeProvider) GenerateVideo(_ context.Context, request provider.VideoRequest) (provider.Job, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lastVideo = request
 	job := provider.Job{ID: "video-job", Kind: "video", Status: provider.JobQueued, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	f.jobs[job.ID] = job
 	f.data[job.ID] = "video-bytes"
@@ -109,9 +111,49 @@ func TestGenerateImagePersistsAssetAndProvenance(t *testing.T) {
 	if hash, _ := project.HashFile(path); hash != result.Asset.SHA256 {
 		t.Fatalf("asset checksum mismatch")
 	}
+	snapshot, err := service.Store.Open(root)
+	if err != nil || snapshot.Shots[0].SelectedAssetID != result.Asset.ID {
+		t.Fatalf("first image was not selected: %+v %v", snapshot.Shots, err)
+	}
 	refreshed, err := service.GetRun(context.Background(), result.Run.ID)
 	if err != nil || refreshed.Asset == nil || refreshed.Asset.ID != result.Asset.ID {
 		t.Fatalf("idempotent status refresh failed: %+v %v", refreshed, err)
+	}
+}
+
+func TestVideoUsesSelectedKeyframeAndPersistsLineage(t *testing.T) {
+	service, _ := setupService(t, approval.AutoGate{Approved: true})
+	image, err := service.GenerateImage(context.Background(), "shot-1", provider.ImageRequest{Prompt: "keyframe"})
+	if err != nil || image.Asset == nil {
+		t.Fatalf("image = %+v, err = %v", image, err)
+	}
+	video, err := service.GenerateVideo(context.Background(), "shot-1", provider.VideoRequest{Prompt: "slow push in"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := service.Provider.(*fakeProvider)
+	if fake.lastVideo.ReferenceAssetID != image.Asset.ID || fake.lastVideo.ReferencePath == "" {
+		t.Fatalf("video reference was not resolved: %+v", fake.lastVideo)
+	}
+	completed, err := service.GetRun(context.Background(), video.Run.ID)
+	if err != nil || completed.Asset == nil || completed.Asset.ParentAssetID != image.Asset.ID {
+		t.Fatalf("video lineage = %+v, err = %v", completed, err)
+	}
+	again, err := service.GetRun(context.Background(), video.Run.ID)
+	if err != nil || again.Asset == nil || again.Asset.ID != completed.Asset.ID {
+		t.Fatalf("video refresh was not idempotent: %+v, err = %v", again, err)
+	}
+}
+
+func TestCancelRunningVideo(t *testing.T) {
+	service, _ := setupService(t, approval.AutoGate{Approved: true})
+	video, err := service.GenerateVideo(context.Background(), "shot-1", provider.VideoRequest{Prompt: "cancel me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := service.CancelRun(context.Background(), video.Run.ID)
+	if err != nil || cancelled.Run.Status != domain.RunCancelled || cancelled.Job.Status != provider.JobCancelled {
+		t.Fatalf("cancelled = %+v, err = %v", cancelled, err)
 	}
 }
 

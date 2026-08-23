@@ -38,6 +38,8 @@ Each asset records:
 
 Imported files use provider `external-import` and are copied into the project rather than referenced by an external absolute path.
 
+`Shot.referenceAssets` contains imported reference-image IDs. `Shot.selectedAssetId` accepts generated image assets only. A generated or imported video records the selected keyframe in `parentAssetId` when one exists, preserving the keyframe-to-video lineage without adding provider-specific fields.
+
 ## Run state machine
 
 ```text

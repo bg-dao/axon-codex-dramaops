@@ -33,13 +33,17 @@ The SceneOps MCP server is injected with command-line `--config` overrides for `
 
 The app-server process is restarted once after an unexpected exit. The active thread ID is stored in `sceneops.project.json`; after restart, SceneOps sends `thread/resume`. A second exit fails visibly with diagnostics instead of entering a restart loop.
 
-Media jobs store the provider job ID in `runs/<run-id>.json`. Polling after restart refreshes the provider status and downloads a completed result idempotently. An asset with the same run ID is reused instead of duplicated.
+Media jobs store the provider job ID in `runs/<run-id>.json`. The desktop app polls active video runs every two seconds while a project is open. Polling after restart refreshes the provider status and downloads a completed result idempotently. An asset with the same run ID is reused instead of duplicated.
 
 ## Data ownership
 
 JSON manifests and media bytes are durable truth. `.sceneops/index.sqlite` contains only derived list/search state. `RebuildIndex` drops derived rows and repopulates them from project manifests.
 
 Core types do not name OpenAI, GPT Image, or a video model. Those values exist only in `Provenance` or the OpenAI adapter.
+
+The guided workflow is derived from the current snapshot rather than persisted as another state machine. `brief.md`, scenes, shots, selected image assets, videos, and runs determine the next suggested action.
+
+External video import is the stable v0.1 path. A provider may optionally accept the selected keyframe as a verified local reference. The OpenAI Videos adapter is exposed only as an experimental, capability-gated implementation because that API is deprecated and scheduled to shut down on September 24, 2026.
 
 ## References
 

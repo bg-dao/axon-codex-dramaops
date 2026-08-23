@@ -37,3 +37,52 @@ export function reduceAgentEvent(state: AgentState, event: AgentEvent): AgentSta
 export function sortedStoryboard<T extends { order?: number }>(items: T[]): T[] {
   return [...items].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
+
+export type AssetLike = { id: string; shotId?: string; kind: string };
+export type RunLike = { id: string; operation: string; status: string; providerJobId?: string };
+
+export function briefHasContent(value: string): boolean {
+  const body = value
+    .replace(/^\s*#\s*Creative brief\s*/i, '')
+    .replace('Describe the story, audience, visual language, and delivery constraints.', '')
+    .trim();
+  return body.length > 0;
+}
+
+export function partitionShotAssets<T extends AssetLike>(assets: T[]) {
+  return {
+    images: assets.filter((asset) => asset.kind === 'image'),
+    references: assets.filter((asset) => asset.kind === 'reference'),
+    videos: assets.filter((asset) => asset.kind === 'video'),
+  };
+}
+
+export function workflowSummary(snapshot: {
+  brief: string;
+  scenes: unknown[];
+  shots: { selectedAssetId?: string }[];
+  assets: AssetLike[];
+}) {
+  const images = snapshot.assets.filter((asset) => asset.kind === 'image');
+  const videos = snapshot.assets.filter((asset) => asset.kind === 'video');
+  const imageIDs = new Set(images.map((asset) => asset.id));
+  const selected = snapshot.shots.filter((shot) => shot.selectedAssetId && imageIDs.has(shot.selectedAssetId)).length;
+  const next = !briefHasContent(snapshot.brief)
+    ? 'brief'
+    : snapshot.shots.length === 0
+      ? 'storyboard'
+      : images.length === 0
+        ? 'keyframes'
+        : selected === 0
+          ? 'versions'
+          : videos.length === 0
+            ? 'video'
+            : 'export';
+  return { scenes: snapshot.scenes.length, shots: snapshot.shots.length, images: images.length, selected, videos: videos.length, next } as const;
+}
+
+export function activeVideoRunIDs(runs: RunLike[]): string[] {
+  return runs
+    .filter((run) => run.operation === 'video_generate' && run.status === 'running' && Boolean(run.providerJobId))
+    .map((run) => run.id);
+}

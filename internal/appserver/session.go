@@ -237,6 +237,11 @@ func (s *Session) ResolveApproval(requestID, decision string) error {
 	return client.RespondServerRequest(requestID, decision)
 }
 
+func (s *Session) Running() bool {
+	_, err := s.activeClient()
+	return err == nil
+}
+
 func (s *Session) Close() error {
 	s.mu.Lock()
 	s.closed = true

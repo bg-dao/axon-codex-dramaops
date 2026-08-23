@@ -80,12 +80,17 @@ func (b *Backend) SetProject(root string) error {
 	if b.monitorCancel != nil {
 		b.monitorCancel()
 	}
+	oldSession := b.session
+	b.session = nil
 	b.root = root
 	b.gate = approval.NewFileGate(root)
 	b.media = &media.Service{Root: root, Store: b.store, Provider: b.provider, Approval: b.gate}
 	monitorCtx, cancel := context.WithCancel(b.context())
 	b.monitorCancel = cancel
 	b.mu.Unlock()
+	if oldSession != nil {
+		_ = oldSession.Close()
+	}
 	go b.monitor(monitorCtx, root)
 	return nil
 }

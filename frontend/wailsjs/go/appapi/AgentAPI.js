@@ -6,6 +6,10 @@ export function Account() {
   return window['go']['appapi']['AgentAPI']['Account']();
 }
 
+export function GenerateStoryboard() {
+  return window['go']['appapi']['AgentAPI']['GenerateStoryboard']();
+}
+
 export function InterruptTurn(arg1, arg2) {
   return window['go']['appapi']['AgentAPI']['InterruptTurn'](arg1, arg2);
 }

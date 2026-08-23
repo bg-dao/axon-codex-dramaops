@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -55,6 +57,15 @@ func TestOpenAIVideoLifecycle(t *testing.T) {
 			if request.FormValue("seconds") != "4" || request.FormValue("size") != "1280x720" {
 				t.Fatalf("unexpected video defaults: %s %s", request.FormValue("seconds"), request.FormValue("size"))
 			}
+			file, _, err := request.FormFile("input_reference")
+			if err != nil {
+				t.Fatalf("missing input_reference: %v", err)
+			}
+			data, _ := io.ReadAll(file)
+			_ = file.Close()
+			if string(data) != "reference-image" {
+				t.Fatalf("input_reference = %q", data)
+			}
 			_, _ = io.WriteString(writer, `{"id":"video_1","status":"queued","progress":0,"created_at":1712697600}`)
 		case request.Method == http.MethodGet && request.URL.Path == "/videos/video_1":
 			count := retrievals.Add(1)
@@ -74,10 +85,14 @@ func TestOpenAIVideoLifecycle(t *testing.T) {
 	defer server.Close()
 	client := NewOpenAIWithClient(server.URL, server.Client(), func() (string, error) { return "test-key", nil })
 	capabilities, err := client.Capabilities(context.Background())
-	if err != nil || !capabilities.VideoGeneration {
+	if err != nil || !capabilities.VideoGeneration || !capabilities.VideoReferences || !capabilities.VideoExperimental {
 		t.Fatalf("capabilities = %+v, err = %v", capabilities, err)
 	}
-	job, err := client.GenerateVideo(context.Background(), VideoRequest{Prompt: "slow camera move"})
+	referencePath := filepath.Join(t.TempDir(), "reference.png")
+	if err := os.WriteFile(referencePath, []byte("reference-image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job, err := client.GenerateVideo(context.Background(), VideoRequest{Prompt: "slow camera move", ReferencePath: referencePath})
 	if err != nil || job.Status != JobQueued {
 		t.Fatalf("generate = %+v, err = %v", job, err)
 	}

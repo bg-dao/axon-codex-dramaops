@@ -6,6 +6,10 @@ export function ApplyStoryboard(arg1, arg2, arg3) {
   return window['go']['appapi']['ProjectAPI']['ApplyStoryboard'](arg1, arg2, arg3);
 }
 
+export function ChooseDirectory(arg1) {
+  return window['go']['appapi']['ProjectAPI']['ChooseDirectory'](arg1);
+}
+
 export function Create(arg1, arg2) {
   return window['go']['appapi']['ProjectAPI']['Create'](arg1, arg2);
 }
@@ -24,6 +28,10 @@ export function Open(arg1) {
 
 export function RebuildIndex() {
   return window['go']['appapi']['ProjectAPI']['RebuildIndex']();
+}
+
+export function SaveBrief(arg1) {
+  return window['go']['appapi']['ProjectAPI']['SaveBrief'](arg1);
 }
 
 export function SaveScene(arg1) {

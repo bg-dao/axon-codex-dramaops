@@ -424,6 +424,7 @@ export namespace domain {
 	}
 	export class Snapshot {
 	    root: string;
+	    brief: string;
 	    project: Project;
 	    scenes: Scene[];
 	    shots: Shot[];
@@ -437,6 +438,7 @@ export namespace domain {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.root = source["root"];
+	        this.brief = source["brief"];
 	        this.project = this.convertValues(source["project"], Project);
 	        this.scenes = this.convertValues(source["scenes"], Scene);
 	        this.shots = this.convertValues(source["shots"], Shot);
@@ -530,9 +532,12 @@ export namespace provider {
 	export class Capabilities {
 	    imageGeneration: boolean;
 	    videoGeneration: boolean;
+	    videoReferences: boolean;
+	    videoExperimental: boolean;
 	    imageModels: string[];
 	    videoModels: string[];
 	    reason?: string;
+	    videoNotice?: string;
 
 	    static createFrom(source: any = {}) {
 	        return new Capabilities(source);
@@ -542,9 +547,12 @@ export namespace provider {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.imageGeneration = source["imageGeneration"];
 	        this.videoGeneration = source["videoGeneration"];
+	        this.videoReferences = source["videoReferences"];
+	        this.videoExperimental = source["videoExperimental"];
 	        this.imageModels = source["imageModels"];
 	        this.videoModels = source["videoModels"];
 	        this.reason = source["reason"];
+	        this.videoNotice = source["videoNotice"];
 	    }
 	}
 	export class ImageRequest {
@@ -620,7 +628,7 @@ export namespace provider {
 	    model?: string;
 	    seconds?: number;
 	    size?: string;
-	    referencePath?: string;
+	    referenceAssetId?: string;
 	    parameters?: Record<string, any>;
 
 	    static createFrom(source: any = {}) {
@@ -633,7 +641,7 @@ export namespace provider {
 	        this.model = source["model"];
 	        this.seconds = source["seconds"];
 	        this.size = source["size"];
-	        this.referencePath = source["referencePath"];
+	        this.referenceAssetId = source["referenceAssetId"];
 	        this.parameters = source["parameters"];
 	    }
 	}

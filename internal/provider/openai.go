@@ -11,6 +11,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,7 +53,12 @@ func NewOpenAIWithClient(baseURL string, client *http.Client, apiKey APIKeySourc
 func (o *OpenAI) Name() string { return "openai" }
 
 func (o *OpenAI) Capabilities(ctx context.Context) (Capabilities, error) {
-	result := Capabilities{ImageGeneration: true, ImageModels: []string{DefaultImageModel}}
+	result := Capabilities{
+		ImageGeneration:   true,
+		ImageModels:       []string{DefaultImageModel},
+		VideoExperimental: true,
+		VideoNotice:       "OpenAI Videos API is deprecated and scheduled to shut down on September 24, 2026; prefer external video import.",
+	}
 	request, err := o.request(ctx, http.MethodGet, "/models/"+url.PathEscape(DefaultVideoModel), nil, "")
 	if err != nil {
 		result.Reason = err.Error()
@@ -65,6 +72,7 @@ func (o *OpenAI) Capabilities(ctx context.Context) (Capabilities, error) {
 	defer response.Body.Close()
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		result.VideoGeneration = true
+		result.VideoReferences = true
 		result.VideoModels = []string{DefaultVideoModel}
 	} else {
 		result.Reason = "OpenAI Videos API is not available for this API key"
@@ -163,7 +171,21 @@ func (o *OpenAI) GenerateVideo(ctx context.Context, input VideoRequest) (Job, er
 	_ = writer.WriteField("seconds", strconv.Itoa(seconds))
 	_ = writer.WriteField("size", size)
 	if input.ReferencePath != "" {
-		return Job{}, errors.New("video input references are not yet supported by the v0.1 adapter")
+		file, err := os.Open(input.ReferencePath)
+		if err != nil {
+			return Job{}, fmt.Errorf("open video input reference: %w", err)
+		}
+		part, err := writer.CreateFormFile("input_reference", filepath.Base(input.ReferencePath))
+		if err == nil {
+			_, err = io.Copy(part, file)
+		}
+		closeErr := file.Close()
+		if err != nil {
+			return Job{}, fmt.Errorf("encode video input reference: %w", err)
+		}
+		if closeErr != nil {
+			return Job{}, closeErr
+		}
 	}
 	if err := writer.Close(); err != nil {
 		return Job{}, err

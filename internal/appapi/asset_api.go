@@ -40,6 +40,16 @@ func (a *AssetAPI) GenerateVideo(shotID string, request provider.VideoRequest) (
 	return service.GenerateVideo(a.backend.context(), shotID, request)
 }
 
+func (a *AssetAPI) Capabilities() (provider.Capabilities, error) {
+	service, err := a.backend.Media()
+	if err != nil {
+		return provider.Capabilities{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.backend.context(), 20*time.Second)
+	defer cancel()
+	return service.Provider.Capabilities(ctx)
+}
+
 func (a *AssetAPI) GetRun(runID string) (media.Result, error) {
 	service, err := a.backend.Media()
 	if err != nil {
@@ -151,7 +161,20 @@ func (a *AssetAPI) importFromDialog(shotID string, kind domain.AssetKind, displa
 	if err != nil || source == "" {
 		return domain.Asset{}, err
 	}
-	asset, err := a.backend.store.ImportAsset(root, source, shotID, kind)
+	parentAssetID := ""
+	if kind == domain.AssetKindVideo {
+		snapshot, openErr := a.backend.store.Open(root)
+		if openErr != nil {
+			return domain.Asset{}, openErr
+		}
+		for _, shot := range snapshot.Shots {
+			if shot.ID == shotID {
+				parentAssetID = shot.SelectedAssetID
+				break
+			}
+		}
+	}
+	asset, err := a.backend.store.ImportAssetWithParent(root, source, shotID, kind, parentAssetID)
 	if err == nil {
 		a.backend.emit(EventProjectChanged, map[string]any{"root": root})
 	}
@@ -167,28 +190,9 @@ func (a *AssetAPI) SelectVersion(shotID, assetID string) (domain.Shot, error) {
 	if err != nil {
 		return domain.Shot{}, err
 	}
-	snapshot, err := a.backend.store.Open(root)
-	if err != nil {
-		return domain.Shot{}, err
+	shot, err := a.backend.store.SelectImageVersion(root, shotID, assetID)
+	if err == nil {
+		a.backend.emit(EventProjectChanged, map[string]any{"root": root})
 	}
-	assetFound := false
-	for _, asset := range snapshot.Assets {
-		if asset.ID == assetID && asset.ShotID == shotID {
-			assetFound = true
-			break
-		}
-	}
-	if !assetFound {
-		return domain.Shot{}, fmt.Errorf("asset %s is not a version of shot %s", assetID, shotID)
-	}
-	for _, shot := range snapshot.Shots {
-		if shot.ID == shotID {
-			shot.SelectedAssetID = assetID
-			if err := a.backend.store.SaveShot(root, shot); err != nil {
-				return domain.Shot{}, err
-			}
-			return shot, nil
-		}
-	}
-	return domain.Shot{}, fmt.Errorf("shot %s not found", shotID)
+	return shot, err
 }

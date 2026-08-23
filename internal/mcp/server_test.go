@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bg-dao/axon-codex-sceneops/internal/approval"
@@ -32,6 +33,9 @@ func TestServerInitializeListAndProjectRead(t *testing.T) {
 	if _, err := store.Create(root, "MCP Test"); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.SaveBrief(root, "# Creative brief\n\nA tactile product film.\n"); err != nil {
+		t.Fatal(err)
+	}
 	handler := &Handler{Root: root, Store: store, Approval: approval.AutoGate{Approved: true}}
 	input := bytes.NewBufferString(
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n" +
@@ -51,18 +55,19 @@ func TestServerInitializeListAndProjectRead(t *testing.T) {
 			IsError           bool `json:"isError"`
 			StructuredContent struct {
 				Project domain.Project `json:"project"`
+				Brief   string         `json:"brief"`
 			} `json:"structuredContent"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(lines[2], &callResult); err != nil {
 		t.Fatal(err)
 	}
-	if callResult.Result.IsError || callResult.Result.StructuredContent.Project.Name != "MCP Test" {
+	if callResult.Result.IsError || callResult.Result.StructuredContent.Project.Name != "MCP Test" || !strings.Contains(callResult.Result.StructuredContent.Brief, "tactile product film") {
 		t.Fatalf("unexpected project read: %s", lines[2])
 	}
 }
 
-func TestStoryboardToolIsIdempotentForStableIDs(t *testing.T) {
+func TestStoryboardToolRejectsASecondApply(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "project")
 	store := project.NewStore()
 	if _, err := store.Create(root, "MCP Storyboard"); err != nil {
@@ -73,8 +78,8 @@ func TestStoryboardToolIsIdempotentForStableIDs(t *testing.T) {
 	if _, err := handler.Call(context.Background(), ToolStoryboardApply, args); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := handler.Call(context.Background(), ToolStoryboardApply, args); err != nil {
-		t.Fatal(err)
+	if _, err := handler.Call(context.Background(), ToolStoryboardApply, args); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected second apply to fail closed, got %v", err)
 	}
 	snapshot, _ := store.Open(root)
 	if len(snapshot.Scenes) != 1 || len(snapshot.Shots) != 1 {

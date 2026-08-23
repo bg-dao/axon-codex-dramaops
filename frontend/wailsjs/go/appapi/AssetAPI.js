@@ -6,6 +6,10 @@ export function CancelRun(arg1) {
   return window['go']['appapi']['AssetAPI']['CancelRun'](arg1);
 }
 
+export function Capabilities() {
+  return window['go']['appapi']['AssetAPI']['Capabilities']();
+}
+
 export function DataURL(arg1) {
   return window['go']['appapi']['AssetAPI']['DataURL'](arg1);
 }
